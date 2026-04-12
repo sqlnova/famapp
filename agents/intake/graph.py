@@ -9,6 +9,8 @@ from langgraph.graph import END, START, StateGraph
 from agents.intake.nodes import (
     build_response,
     determine_route,
+    handle_logistics,
+    handle_schedule,
     handle_shopping,
     parse_and_classify,
 )
@@ -21,34 +23,35 @@ logger = structlog.get_logger(__name__)
 
 
 def build_intake_graph() -> StateGraph:
-    """Construct and compile the Intake Agent graph."""
     graph = StateGraph(IntakeState)
 
-    # ── Nodes ────────────────────────────────────────────────────
     graph.add_node("parse_and_classify", parse_and_classify)
-    graph.add_node("handle_shopping", handle_shopping)
-    graph.add_node("build_response", build_response)
+    graph.add_node("handle_shopping",   handle_shopping)
+    graph.add_node("handle_schedule",   handle_schedule)
+    graph.add_node("handle_logistics",  handle_logistics)
+    graph.add_node("build_response",    build_response)
 
-    # ── Edges ────────────────────────────────────────────────────
     graph.add_edge(START, "parse_and_classify")
 
-    # Conditional routing after classification
     graph.add_conditional_edges(
         "parse_and_classify",
         determine_route,
         {
-            "handle_shopping": "handle_shopping",
-            "build_response":  "build_response",
+            "handle_shopping":  "handle_shopping",
+            "handle_schedule":  "handle_schedule",
+            "handle_logistics": "handle_logistics",
+            "build_response":   "build_response",
         },
     )
 
-    graph.add_edge("handle_shopping", "build_response")
-    graph.add_edge("build_response", END)
+    graph.add_edge("handle_shopping",  "build_response")
+    graph.add_edge("handle_schedule",  "build_response")
+    graph.add_edge("handle_logistics", "build_response")
+    graph.add_edge("build_response",   END)
 
     return graph.compile()
 
 
-# Compiled graph (module-level singleton)
 intake_graph = build_intake_graph()
 
 
@@ -57,10 +60,6 @@ async def run_intake(
     sender: str,
     raw_text: str,
 ) -> Optional[str]:
-    """Run the intake graph for a single incoming message.
-
-    Returns the response text to send back to the user.
-    """
     initial_state: IntakeState = {
         "messages": [],
         "raw_text": raw_text,
@@ -76,7 +75,6 @@ async def run_intake(
 
     try:
         await update_message_status(message_sid, MessageStatus.PROCESSING)
-
         final_state = await intake_graph.ainvoke(initial_state)
         response_text: Optional[str] = final_state.get("response_text")
 
