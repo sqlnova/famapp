@@ -38,7 +38,7 @@ def send_whatsapp_message(to: str, body: str) -> str:
 def broadcast_whatsapp_message(body: str, recipients: Optional[List[str]] = None) -> List[str]:
     """Send a message to multiple family members.  Returns list of SIDs."""
     s = get_settings()
-    targets = recipients or s.family_phone_numbers
+    targets = recipients or s.phone_list
     sids: List[str] = []
     for to in targets:
         try:

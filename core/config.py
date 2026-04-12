@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,10 +24,15 @@ class Settings(BaseSettings):
     twilio_account_sid: str = Field(...)
     twilio_auth_token: str = Field(...)
     twilio_whatsapp_from: str = Field(...)
-    family_phone_numbers: List[str] = Field(
-        default_factory=list,
-        description="Comma-separated list of whatsapp:+XXXXXXXX numbers",
+    # Stored as plain string; use .phone_list property to get a list
+    family_phone_numbers: str = Field(
+        default="",
+        description="Comma-separated whatsapp:+XXXXXXXX numbers",
     )
+
+    @property
+    def phone_list(self) -> List[str]:
+        return [p.strip() for p in self.family_phone_numbers.split(",") if p.strip()]
 
     # ── Supabase ──────────────────────────────────────────────────
     supabase_url: str = Field(...)
@@ -39,7 +44,7 @@ class Settings(BaseSettings):
     google_token_json: str = Field("./credentials/google_token.json")
 
     # ── Google Maps ───────────────────────────────────────────────
-    google_maps_api_key: str = Field(...)
+    google_maps_api_key: Optional[str] = Field(None)  # required when Logistics Agent is active
 
     # ── App ───────────────────────────────────────────────────────
     app_env: str = Field("development")
