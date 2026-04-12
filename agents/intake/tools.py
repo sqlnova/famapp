@@ -1,0 +1,39 @@
+"""Tools available to the Intake Agent."""
+from __future__ import annotations
+
+import json
+from typing import Any, Dict
+
+import structlog
+from langchain_core.tools import tool
+
+from core.supabase_client import add_shopping_item, get_pending_shopping_items
+from core.models import ShoppingItem
+
+logger = structlog.get_logger(__name__)
+
+
+@tool
+async def add_item_to_shopping_list(name: str, quantity: str = "", unit: str = "", added_by: str = "") -> str:
+    """Add an item to the family shopping list in Supabase.
+
+    Args:
+        name: Name of the product (e.g. "leche", "pan").
+        quantity: Optional quantity (e.g. "2", "1 litro").
+        unit: Optional unit of measure (e.g. "kg", "unidades").
+        added_by: Phone number of the person who requested it.
+    """
+    item = ShoppingItem(name=name, quantity=quantity or None, unit=unit or None, added_by=added_by or None)
+    saved = await add_shopping_item(item)
+    logger.info("shopping_item_added", item=name)
+    return f"Agregué '{name}' a la lista de compras."
+
+
+@tool
+async def list_shopping_items() -> str:
+    """Return all pending items in the family shopping list."""
+    items = await get_pending_shopping_items()
+    if not items:
+        return "La lista de compras está vacía."
+    lines = [f"- {i.name}" + (f" ({i.quantity} {i.unit or ''}".strip() + ")" if i.quantity else "") for i in items]
+    return "Lista de compras pendiente:\n" + "\n".join(lines)
