@@ -4,7 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import List, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,13 @@ class Settings(BaseSettings):
         default_factory=list,
         description="Comma-separated list of whatsapp:+XXXXXXXX numbers",
     )
+
+    @field_validator("family_phone_numbers", mode="before")
+    @classmethod
+    def parse_phone_numbers(cls, v: object) -> list:
+        if isinstance(v, str):
+            return [p.strip() for p in v.split(",") if p.strip()]
+        return v  # type: ignore[return-value]
 
     # ── Supabase ──────────────────────────────────────────────────
     supabase_url: str = Field(...)
