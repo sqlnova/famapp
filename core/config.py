@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     google_token_json: str = Field("./credentials/google_token.json")
 
     # ── Google Maps ───────────────────────────────────────────────
-    google_maps_api_key: str = Field(...)
+    google_maps_api_key: Optional[str] = Field(None)  # required when Logistics Agent is active
 
     # ── App ───────────────────────────────────────────────────────
     app_env: str = Field("development")
