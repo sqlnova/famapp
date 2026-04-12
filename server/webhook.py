@@ -1,7 +1,7 @@
 """FastAPI app – Twilio WhatsApp webhook + health endpoints."""
 from __future__ import annotations
 
-import asyncio
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 import structlog
@@ -16,20 +16,41 @@ from agents.intake.graph import run_intake
 
 logger = structlog.get_logger(__name__)
 
-app = FastAPI(title="FamApp", version="0.1.0")
+
+# ── Lifespan: start/stop scheduler ───────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    s = get_settings()
+    scheduler = None
+    if s.google_maps_api_key:
+        try:
+            from agents.logistics.proactive import start_scheduler, stop_scheduler
+            scheduler = start_scheduler()
+            logger.info("logistics_scheduler_enabled")
+        except Exception:
+            logger.exception("logistics_scheduler_failed_to_start")
+    else:
+        logger.info("logistics_scheduler_disabled", reason="GOOGLE_MAPS_API_KEY not set")
+
+    yield  # app is running
+
+    if scheduler:
+        from agents.logistics.proactive import stop_scheduler
+        stop_scheduler()
+
+
+app = FastAPI(title="FamApp", version="0.2.0", lifespan=lifespan)
 
 
 # ── Twilio signature validation ───────────────────────────────────────────────
 
 def _validate_twilio_signature(request: Request, form_data: dict) -> bool:
-    """Validate that the request genuinely comes from Twilio."""
     s = get_settings()
     if s.is_production:
         validator = RequestValidator(s.twilio_auth_token)
         signature = request.headers.get("X-Twilio-Signature", "")
-        url = str(request.url)
-        return validator.validate(url, form_data, signature)
-    # In dev, skip validation
+        return validator.validate(str(request.url), form_data, signature)
     return True
 
 
@@ -37,16 +58,15 @@ def _validate_twilio_signature(request: Request, form_data: dict) -> bool:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "service": "famapp"}
+    return {"status": "ok", "service": "famapp", "version": "0.2.0"}
 
 
-# ── WhatsApp incoming webhook ─────────────────────────────────────────────────
+# ── WhatsApp webhook ──────────────────────────────────────────────────────────
 
 @app.post("/webhook/whatsapp", response_class=PlainTextResponse)
 async def whatsapp_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
-    # Twilio form fields
     MessageSid: Annotated[str, Form()] = "",
     From: Annotated[str, Form()] = "",
     To: Annotated[str, Form()] = "",
@@ -72,7 +92,6 @@ async def whatsapp_webhook(
 
     logger.info("whatsapp_received", sid=msg.message_sid, from_=msg.from_number, body=msg.body[:80])
 
-    # Persist immediately so we don't lose the message
     record = MessageRecord(
         message_sid=msg.message_sid,
         from_number=msg.from_number,
@@ -81,7 +100,6 @@ async def whatsapp_webhook(
     )
     await upsert_message(record)
 
-    # Process asynchronously so Twilio doesn't timeout (5 s limit)
     background_tasks.add_task(
         run_intake,
         message_sid=msg.message_sid,
@@ -89,5 +107,4 @@ async def whatsapp_webhook(
         raw_text=msg.body,
     )
 
-    # Twilio expects an empty 200 or TwiML – empty is fine for WhatsApp
     return PlainTextResponse("", status_code=200)
