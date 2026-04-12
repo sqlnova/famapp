@@ -4,7 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import List, Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,17 +24,15 @@ class Settings(BaseSettings):
     twilio_account_sid: str = Field(...)
     twilio_auth_token: str = Field(...)
     twilio_whatsapp_from: str = Field(...)
-    family_phone_numbers: List[str] = Field(
-        default_factory=list,
-        description="Comma-separated list of whatsapp:+XXXXXXXX numbers",
+    # Stored as plain string; use .phone_list property to get a list
+    family_phone_numbers: str = Field(
+        default="",
+        description="Comma-separated whatsapp:+XXXXXXXX numbers",
     )
 
-    @field_validator("family_phone_numbers", mode="before")
-    @classmethod
-    def parse_phone_numbers(cls, v: object) -> list:
-        if isinstance(v, str):
-            return [p.strip() for p in v.split(",") if p.strip()]
-        return v  # type: ignore[return-value]
+    @property
+    def phone_list(self) -> List[str]:
+        return [p.strip() for p in self.family_phone_numbers.split(",") if p.strip()]
 
     # ── Supabase ──────────────────────────────────────────────────
     supabase_url: str = Field(...)
