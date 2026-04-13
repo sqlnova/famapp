@@ -1,13 +1,16 @@
 """Tools available to the Intake Agent."""
 from __future__ import annotations
 
-import json
-from typing import Any, Dict
+from typing import List
 
 import structlog
 from langchain_core.tools import tool
 
-from core.supabase_client import add_shopping_item, get_pending_shopping_items
+from core.supabase_client import (
+    add_shopping_item,
+    get_pending_shopping_items,
+    mark_shopping_items_done_by_names,
+)
 from core.models import ShoppingItem
 
 logger = structlog.get_logger(__name__)
@@ -24,9 +27,9 @@ async def add_item_to_shopping_list(name: str, quantity: str = "", unit: str = "
         added_by: Phone number of the person who requested it.
     """
     item = ShoppingItem(name=name, quantity=quantity or None, unit=unit or None, added_by=added_by or None)
-    saved = await add_shopping_item(item)
+    await add_shopping_item(item)
     logger.info("shopping_item_added", item=name)
-    return f"Agregué '{name}' a la lista de compras."
+    return f"Agregué *{name}* a la lista. 🛒"
 
 
 @tool
@@ -34,6 +37,29 @@ async def list_shopping_items() -> str:
     """Return all pending items in the family shopping list."""
     items = await get_pending_shopping_items()
     if not items:
-        return "La lista de compras está vacía."
-    lines = [f"- {i.name}" + (f" ({i.quantity} {i.unit or ''}".strip() + ")" if i.quantity else "") for i in items]
-    return "Lista de compras pendiente:\n" + "\n".join(lines)
+        return "La lista de compras está vacía. 🎉"
+    lines = []
+    for i, item in enumerate(items, 1):
+        line = f"{i}. {item.name}"
+        if item.quantity:
+            unit_str = f" {item.unit}" if item.unit else ""
+            line += f" ({item.quantity}{unit_str})"
+        lines.append(line)
+    return "🛒 *Lista de compras:*\n" + "\n".join(lines)
+
+
+@tool
+async def mark_items_done(names: List[str]) -> str:
+    """Mark one or more shopping items as purchased/done.
+
+    Args:
+        names: List of item names to mark as done (e.g. ["leche", "pan"]).
+               Uses a case-insensitive partial match.
+    """
+    if not names:
+        return "¿Qué ítem querés tachar de la lista?"
+    count = await mark_shopping_items_done_by_names(names)
+    done_str = ", ".join(f"*{n}*" for n in names)
+    if count == 0:
+        return f"No encontré {done_str} en la lista pendiente. ¿Ya estaba tachado?"
+    return f"✅ Listo, tachê {done_str} de la lista."

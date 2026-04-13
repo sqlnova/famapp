@@ -7,10 +7,11 @@ from uuid import UUID
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from agents.logistics.maps_client import get_travel_time
-from agents.schedule.calendar_client import get_events_in_window
+from agents.schedule.calendar_client import AR_TZ, get_events_in_window
 from core.config import get_settings
 from core.models import CalendarEvent
 from core.supabase_client import get_supabase
@@ -44,6 +45,8 @@ def _save_alert(
     client = get_supabase()
     client.table("logistics_alerts").insert({
         "calendar_event_id": event.id,
+        "event_title": event.title,
+        "event_start_utc": event.start.astimezone(timezone.utc).isoformat(),
         "destination": event.location,
         "scheduled_send": scheduled_send.isoformat(),
         "sent": False,
@@ -107,7 +110,11 @@ async def _process_event(event: CalendarEvent) -> None:
 
 def _fire_alert(event: CalendarEvent, travel_minutes: int, leave_in_minutes: int) -> None:
     """Send the proactive WhatsApp departure alert."""
-    travel_str = f"{travel_minutes} min" if travel_minutes < 60 else f"{travel_minutes // 60}h {travel_minutes % 60}min"
+    travel_str = (
+        f"{travel_minutes} min"
+        if travel_minutes < 60
+        else f"{travel_minutes // 60}h {travel_minutes % 60}min"
+    )
     if leave_in_minutes <= 0:
         time_phrase = "¡Ya tendrías que haber salido!"
     elif leave_in_minutes <= 5:
@@ -115,7 +122,7 @@ def _fire_alert(event: CalendarEvent, travel_minutes: int, leave_in_minutes: int
     else:
         time_phrase = f"Salí en {leave_in_minutes} min"
 
-    local_start = event.start.astimezone()
+    local_start = event.start.astimezone(AR_TZ)
     event_time = local_start.strftime("%H:%M")
 
     msg = (
@@ -143,24 +150,25 @@ async def check_and_send_due_alerts() -> None:
     )
     for row in result.data:
         try:
-            # Re-fetch the calendar event details from the row data
-            cal_event = CalendarEvent(
-                id=row["calendar_event_id"],
-                title=row.get("destination", "Evento"),  # fallback
-                start=datetime.fromisoformat(row["scheduled_send"]),
-                end=datetime.fromisoformat(row["scheduled_send"]),
-                location=row["destination"],
-            )
+            event_title = row.get("event_title") or "Evento"
+            destination = row.get("destination", "")
+            event_time_str = ""
+            event_start_raw = row.get("event_start_utc")
+            if event_start_raw:
+                start_dt = datetime.fromisoformat(event_start_raw).astimezone(AR_TZ)
+                event_time_str = start_dt.strftime("%H:%M")
+
             send_to = row.get("send_to") or []
-            travel_str = "calculado"
             msg = (
                 f"🚗 *¡Es hora de salir!*\n"
-                f"📍 {row['destination']}\n"
+                f"📅 {event_title}"
+                + (f" a las {event_time_str}" if event_time_str else "")
+                + f"\n📍 {destination}\n"
                 f"⏱ Recordá salir con tiempo suficiente."
             )
             broadcast_whatsapp_message(msg, recipients=send_to if send_to else None)
             _mark_alert_sent(row["calendar_event_id"])
-            logger.info("logistics_due_alert_sent", destination=row["destination"])
+            logger.info("logistics_due_alert_sent", event=event_title, destination=destination)
         except Exception:
             logger.exception("logistics_due_alert_error", row_id=row.get("id"))
 
@@ -186,6 +194,8 @@ def start_scheduler() -> AsyncIOScheduler:
     s = get_settings()
 
     _scheduler = AsyncIOScheduler(timezone="America/Argentina/Buenos_Aires")
+
+    # Logistics: poll calendar every N minutes
     _scheduler.add_job(
         poll_calendar_and_schedule,
         trigger=IntervalTrigger(minutes=s.scheduler_interval_minutes),
@@ -194,13 +204,32 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
         next_run_time=datetime.now(),  # run immediately on start
     )
+
+    # Daily morning summary at 7:00 AM Argentina time
+    _scheduler.add_job(
+        _run_daily_summary,
+        trigger=CronTrigger(hour=7, minute=0, timezone="America/Argentina/Buenos_Aires"),
+        id="daily_summary",
+        name="Daily morning summary at 7am AR",
+        replace_existing=True,
+    )
+
     _scheduler.start()
-    logger.info("logistics_scheduler_started", interval_min=s.scheduler_interval_minutes)
+    logger.info("scheduler_started", interval_min=s.scheduler_interval_minutes)
     return _scheduler
+
+
+async def _run_daily_summary() -> None:
+    """Wrapper that imports and calls send_daily_summary (avoids circular import at module load)."""
+    try:
+        from agents.schedule.daily_summary import send_daily_summary
+        await send_daily_summary()
+    except Exception:
+        logger.exception("daily_summary_scheduler_error")
 
 
 def stop_scheduler() -> None:
     global _scheduler
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
-        logger.info("logistics_scheduler_stopped")
+        logger.info("scheduler_stopped")

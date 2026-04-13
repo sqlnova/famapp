@@ -124,8 +124,17 @@ def get_events_in_window(
         raise
 
 
-def create_event(event: CalendarEvent) -> CalendarEvent:
-    """Create a new calendar event. Returns the created event with its ID."""
+def create_event(
+    event: CalendarEvent,
+    recurrence: Optional[List[str]] = None,
+) -> CalendarEvent:
+    """Create a new calendar event. Returns the created event with its ID.
+
+    Args:
+        event: The event to create.
+        recurrence: Optional RFC 5545 recurrence rules, e.g.
+                    ["RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20241130T235959Z"]
+    """
     s = get_settings()
     service = _get_service()
 
@@ -140,10 +149,12 @@ def create_event(event: CalendarEvent) -> CalendarEvent:
         body["description"] = event.description
     if event.attendees:
         body["attendees"] = [{"email": a} for a in event.attendees]
+    if recurrence:
+        body["recurrence"] = recurrence
 
     try:
         created = service.events().insert(calendarId=s.google_calendar_id, body=body).execute()
-        logger.info("calendar_event_created", title=event.title, id=created.get("id"))
+        logger.info("calendar_event_created", title=event.title, id=created.get("id"), recurring=bool(recurrence))
         return _parse_event(created)
     except HttpError as e:
         logger.error("calendar_create_error", error=str(e))

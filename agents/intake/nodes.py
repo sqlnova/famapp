@@ -34,7 +34,8 @@ Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
    - "logistics" : tiempo de viaje, a qué hora salir, tráfico, cómo llegar.
                    Ejemplos: "¿cuánto tardo en llegar a Palermo?", "¿a qué hora salgo para llegar a tiempo?"
    - "shopping"  : lista de compras — agregar, consultar o tachar items.
-                   Ejemplos: "agregá leche", "¿qué falta comprar?", "comprar pan y huevos"
+                   Ejemplos: "agregá leche", "¿qué falta comprar?", "comprar pan y huevos",
+                             "tachá la leche", "ya compré el pan", "marca el aceite como comprado"
    - "unknown"   : no podés determinar la intención con certeza
 
    IMPORTANTE: Nunca uses "unknown" si el mensaje claramente habla de calendario, viajes o compras.
@@ -43,7 +44,11 @@ Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
 2. Extraer ENTIDADES según la intención:
    - schedule  → { "title": str, "date": str, "time": str, "location": str, "people": [str] }
    - logistics → { "destination": str, "event_time": str, "origin": str }
-   - shopping  → { "items": [{"name": str, "quantity": str, "unit": str}] }
+   - shopping  → {
+       "action": "add" | "list" | "mark_done",
+       "items": [{"name": str, "quantity": str, "unit": str}]
+     }
+     Para "mark_done" los items contienen solo el nombre de lo que ya se compró.
 
 3. Responder en español rioplatense informal y breve.
 
@@ -96,13 +101,21 @@ async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
 
 async def handle_shopping(state: IntakeState) -> Dict[str, Any]:
     """Process shopping requests within Intake."""
-    from agents.intake.tools import add_item_to_shopping_list, list_shopping_items
+    from agents.intake.tools import add_item_to_shopping_list, list_shopping_items, mark_items_done
 
     entities = state.get("entities", {})
+    action = entities.get("action", "")
     items = entities.get("items", [])
-    responses = []
 
-    if items:
+    if action == "mark_done" and items:
+        names = [item.get("name", "") for item in items if item.get("name")]
+        if names:
+            response_text = await mark_items_done.ainvoke({"names": names})
+        else:
+            response_text = "¿Qué ítem querés tachar de la lista?"
+
+    elif items:
+        responses = []
         for item in items:
             result = await add_item_to_shopping_list.ainvoke({
                 "name": item.get("name", ""),
@@ -112,6 +125,7 @@ async def handle_shopping(state: IntakeState) -> Dict[str, Any]:
             })
             responses.append(result)
         response_text = " ".join(responses)
+
     else:
         response_text = await list_shopping_items.ainvoke({})
 
