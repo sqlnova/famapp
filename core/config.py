@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     # ── Supabase ──────────────────────────────────────────────────
     supabase_url: str = Field(...)
     supabase_service_role_key: str = Field(...)
+    # Public anon key — safe to embed in the browser (used by the web UI)
+    supabase_anon_key: Optional[str] = Field(None)
 
     # ── Google Calendar ───────────────────────────────────────────
     google_calendar_id: str = Field("primary")

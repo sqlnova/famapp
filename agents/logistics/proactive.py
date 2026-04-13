@@ -87,6 +87,12 @@ async def _process_event(event: CalendarEvent) -> None:
     """For a single calendar event, calculate travel time and fire alert if needed."""
     if not event.location or not event.id:
         return
+    # Skip recurring event instances — they fire every day and become noise.
+    # Users who want a one-off reminder say "haceme acordar de..." which creates
+    # a standalone (non-recurring) event that DOES get an alert.
+    if not event.alerts_enabled:
+        logger.debug("logistics_alert_skipped_recurring", event=event.title)
+        return
 
     if _alert_already_scheduled(event.id):
         logger.debug("logistics_alert_exists", event=event.title)
