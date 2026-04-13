@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 import structlog
@@ -33,12 +34,16 @@ if __name__ == "__main__":
     configure_logging(s.log_level)
 
     logger = structlog.get_logger(__name__)
-    logger.info("famapp_starting", env=s.app_env, log_level=s.log_level)
+
+    # Railway (and most PaaS) inject PORT via environment variable
+    port = int(os.environ.get("PORT", 8000))
+
+    logger.info("famapp_starting", env=s.app_env, port=port, log_level=s.log_level)
 
     uvicorn.run(
         "server.webhook:app",
         host="0.0.0.0",
-        port=8000,
+        port=port,
         reload=not s.is_production,
         log_level=s.log_level.lower(),
     )
