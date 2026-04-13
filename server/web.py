@@ -6,17 +6,20 @@ from typing import Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from agents.schedule.calendar_client import AR_TZ, list_upcoming_events
 from core.config import get_settings
 from core.supabase_client import (
+    delete_known_place,
+    get_all_known_places,
     get_family_members,
     get_pending_shopping_items,
     get_supabase,
     mark_shopping_item_done,
+    upsert_known_place,
 )
 
 logger = structlog.get_logger(__name__)
@@ -111,6 +114,41 @@ async def api_family(user=Depends(require_auth)):
             "name": m.name,
             "nickname": m.nickname,
             "whatsapp_number": m.whatsapp_number.replace("whatsapp:", ""),
+            "is_minor": m.is_minor,
         }
         for m in members
     ]
+
+
+@router.put("/api/family/{member_id}/minor")
+async def toggle_minor(member_id: UUID, is_minor: bool = Body(..., embed=True), user=Depends(require_auth)):
+    client = get_supabase()
+    client.table("family_members").update({"is_minor": is_minor}).eq("id", str(member_id)).execute()
+    return {"ok": True}
+
+
+# ── Places ────────────────────────────────────────────────────────────────────
+
+@router.get("/api/places")
+async def api_places(user=Depends(require_auth)):
+    places = get_all_known_places()
+    return [{"alias": p.alias, "name": p.name, "address": p.address} for p in places]
+
+
+@router.post("/api/places")
+async def save_place(
+    alias: str = Body(...),
+    name: str = Body(...),
+    address: str = Body(...),
+    user=Depends(require_auth),
+):
+    place = upsert_known_place(alias, name, address)
+    return {"alias": place.alias, "name": place.name, "address": place.address}
+
+
+@router.delete("/api/places/{alias}")
+async def remove_place(alias: str, user=Depends(require_auth)):
+    deleted = delete_known_place(alias)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Lugar no encontrado")
+    return {"ok": True}

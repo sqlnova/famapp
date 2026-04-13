@@ -15,6 +15,7 @@ class IntentType(str, Enum):
     SCHEDULE = "schedule"       # "agendame una reunión"
     LOGISTICS = "logistics"     # "a qué hora salgo para llegar a tiempo"
     SHOPPING = "shopping"       # "agregá leche a la lista"
+    PLACES = "places"           # "el colegio es en Av. X 123"
     QUERY = "query"             # "qué tengo mañana?"
     UNKNOWN = "unknown"
 
@@ -90,9 +91,17 @@ class CalendarEvent(BaseModel):
 
 class FamilyMember(BaseModel):
     id: Optional[UUID] = None
-    name: str           # display: "Papá", "Mamá"
-    nickname: str       # slug used in events: "papa", "mama"
-    whatsapp_number: str  # whatsapp:+54911...
+    name: str              # display: "Papá", "Mamá"
+    nickname: str          # slug used in events: "papa", "mama"
+    whatsapp_number: str   # whatsapp:+54911...
+    is_minor: bool = False # True for children → "llevar + retirar" rule applies
+
+
+class KnownPlace(BaseModel):
+    id: Optional[UUID] = None
+    alias: str    # short key: "colegio", "club", "supermercado"
+    name: str     # display name: "Club Regatas Resistencia"
+    address: str  # full address for Google Maps
 
 
 # ── Shopping ──────────────────────────────────────────────────────────────────

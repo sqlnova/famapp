@@ -18,6 +18,7 @@ from agents.schedule.calendar_client import (
 )
 from core.config import get_settings
 from core.models import CalendarEvent
+from core.supabase_client import get_known_places_dict, get_minor_members, resolve_place_address
 
 logger = structlog.get_logger(__name__)
 
@@ -110,14 +111,28 @@ def _get_llm() -> ChatOpenAI:
     return ChatOpenAI(model=s.openai_model, api_key=s.openai_api_key, temperature=0)
 
 
-async def plan_action(raw_text: str, entities: Dict[str, Any]) -> Dict[str, Any]:
+async def plan_action(
+    raw_text: str,
+    entities: Dict[str, Any],
+    places_context: str = "",
+    minors_context: str = "",
+) -> Dict[str, Any]:
     """Ask LLM to decide list vs create vs recurring_create and fill in event details."""
     llm = _get_llm()
     today = datetime.now(AR_TZ).strftime("%Y-%m-%d (%A)")
 
+    user_content = f"Mensaje: {raw_text}\nEntidades: {json.dumps(entities, ensure_ascii=False)}"
+    if places_context or minors_context:
+        extra = []
+        if minors_context:
+            extra.append(minors_context)
+        if places_context:
+            extra.append(places_context)
+        user_content += "\n\n" + "\n".join(extra)
+
     messages = [
         SystemMessage(content=SCHEDULE_SYSTEM_PROMPT.format(today=today)),
-        HumanMessage(content=f"Mensaje: {raw_text}\nEntidades: {json.dumps(entities, ensure_ascii=False)}"),
+        HumanMessage(content=user_content),
     ]
     response = await llm.ainvoke(messages)
     try:
@@ -145,7 +160,28 @@ async def handle_schedule(
 ) -> str:
     """Main entry point for the Schedule Agent. Returns WhatsApp response text."""
     try:
-        plan = await plan_action(raw_text, entities)
+        # Load family context from DB
+        try:
+            known_places = get_known_places_dict()
+            minors = get_minor_members()
+        except Exception:
+            known_places = {}
+            minors = []
+
+        places_context = ""
+        if known_places:
+            lines = [
+                f"  • {alias} → {p.address}" + (f" ({p.name})" if p.name.lower() != alias else "")
+                for alias, p in known_places.items()
+            ]
+            places_context = "LUGARES CONOCIDOS (usá la dirección exacta en el campo 'location'):\n" + "\n".join(lines)
+
+        minors_context = ""
+        if minors:
+            names = ", ".join(m.name for m in minors)
+            minors_context = f"MIEMBROS MENORES (aplicar regla llevar+retirar para sus actividades): {names}"
+
+        plan = await plan_action(raw_text, entities, places_context, minors_context)
         action = plan.get("action", "list")
 
         if action == "create":
@@ -160,6 +196,8 @@ async def handle_schedule(
                 time_str = ev_data.get("time", "09:00")
                 duration = int(ev_data.get("duration_minutes", 60))
                 responsible = ev_data.get("responsible") or None
+                # Resolve location alias → full address (fallback if LLM didn't resolve it)
+                location = resolve_place_address(ev_data.get("location") or "", known_places) or None
 
                 start_local = AR_TZ.localize(datetime.fromisoformat(f"{date_str}T{time_str}:00"))
                 end_local = start_local + timedelta(minutes=duration)
@@ -168,7 +206,7 @@ async def handle_schedule(
                     title=ev_data.get("title", "Evento"),
                     start=start_local,
                     end=end_local,
-                    location=ev_data.get("location"),
+                    location=location,
                     responsible_nickname=responsible,
                 )
                 created = create_event(event)
@@ -214,11 +252,12 @@ async def handle_schedule(
                     end_local = start_local + timedelta(minutes=15)
 
                 rrule = _build_rrule(days_of_week, until_date)
+                rec_location = resolve_place_address(ev_data.get("location") or "", known_places) or None
                 event = CalendarEvent(
                     title=title,
                     start=start_local,
                     end=end_local,
-                    location=ev_data.get("location"),
+                    location=rec_location,
                     responsible_nickname=responsible,
                 )
                 create_event(event, recurrence=[rrule])
