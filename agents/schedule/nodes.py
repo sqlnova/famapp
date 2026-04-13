@@ -5,11 +5,13 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+import pytz
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from agents.schedule.calendar_client import (
+    AR_TZ,
     create_event,
     format_events_for_whatsapp,
     list_upcoming_events,
@@ -30,6 +32,7 @@ Para "create", debés completar el evento con los datos disponibles:
 - Si falta la hora, usá 09:00 como default.
 - Si falta la duración, usá 1 hora.
 - Las fechas relativas (mañana, próximo lunes, etc.) calcularlas desde hoy: {today}
+- Los horarios son siempre en zona horaria Argentina (UTC-3)
 
 Respondé SIEMPRE en JSON sin markdown:
 {{
@@ -54,7 +57,7 @@ def _get_llm() -> ChatOpenAI:
 async def plan_action(raw_text: str, entities: Dict[str, Any]) -> Dict[str, Any]:
     """Ask LLM to decide list vs create and fill in event details."""
     llm = _get_llm()
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d (%A)")
+    today = datetime.now(AR_TZ).strftime("%Y-%m-%d (%A)")
 
     messages = [
         SystemMessage(content=SCHEDULE_SYSTEM_PROMPT.format(today=today)),
@@ -85,14 +88,7 @@ async def handle_schedule(
             time_str = ev_data.get("time", "09:00")
             duration = int(ev_data.get("duration_minutes", 60))
 
-            start = datetime.fromisoformat(f"{date_str}T{time_str}:00").replace(
-                tzinfo=timezone.utc
-            )
-            # Adjust for Argentina timezone (UTC-3)
-            from datetime import timezone as tz
-            import pytz
-            ar_tz = pytz.timezone("America/Argentina/Buenos_Aires")
-            start_local = ar_tz.localize(datetime.fromisoformat(f"{date_str}T{time_str}:00"))
+            start_local = AR_TZ.localize(datetime.fromisoformat(f"{date_str}T{time_str}:00"))
             end_local = start_local + timedelta(minutes=duration)
 
             event = CalendarEvent(
