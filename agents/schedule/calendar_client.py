@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
+import pytz
 import structlog
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -15,6 +16,7 @@ from core.models import CalendarEvent
 logger = structlog.get_logger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
+AR_TZ = pytz.timezone("America/Argentina/Buenos_Aires")
 
 
 def _get_service():
@@ -155,7 +157,7 @@ def format_events_for_whatsapp(events: List[CalendarEvent]) -> str:
 
     lines = []
     for e in events:
-        local_start = e.start.astimezone()
+        local_start = e.start.astimezone(AR_TZ)
         date_str = local_start.strftime("%-d/%-m")
         time_str = local_start.strftime("%H:%M")
         line = f"• *{e.title}* – {date_str} a las {time_str}"
