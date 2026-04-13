@@ -65,3 +65,19 @@ async def get_pending_shopping_items() -> List[ShoppingItem]:
 async def mark_shopping_item_done(item_id: UUID) -> None:
     client = get_supabase()
     client.table("shopping_items").update({"done": True}).eq("id", str(item_id)).execute()
+
+
+async def mark_shopping_items_done_by_names(names: List[str]) -> int:
+    """Mark items as done using a case-insensitive partial name match. Returns count updated."""
+    client = get_supabase()
+    total = 0
+    for name in names:
+        result = (
+            client.table("shopping_items")
+            .update({"done": True})
+            .ilike("name", f"%{name.strip()}%")
+            .eq("done", False)
+            .execute()
+        )
+        total += len(result.data)
+    return total
