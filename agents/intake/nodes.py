@@ -28,19 +28,24 @@ SYSTEM_PROMPT = """Sos el agente de recepción (Intake) de FamApp, un sistema fa
 Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
 
 1. Clasificar la INTENCIÓN principal en:
-   - "schedule"  : agendar, modificar o consultar eventos del calendario
-   - "logistics" : saber a qué hora salir, tiempo de viaje, tráfico
-   - "shopping"  : agregar o consultar la lista de compras
-   - "query"     : consulta general
-   - "unknown"   : no podés determinar
+   - "schedule"  : TODO lo relacionado con el calendario — agendar, modificar, cancelar o CONSULTAR eventos.
+                   Usá "schedule" cuando pregunten qué tienen pendiente, qué hay esta semana, cuándo es algo, etc.
+                   Ejemplos: "¿qué tengo mañana?", "¿qué hay esta semana?", "agendame el dentista", "¿cuándo es el cumple de mamá?"
+   - "logistics" : tiempo de viaje, a qué hora salir, tráfico, cómo llegar.
+                   Ejemplos: "¿cuánto tardo en llegar a Palermo?", "¿a qué hora salgo para llegar a tiempo?"
+   - "shopping"  : lista de compras — agregar, consultar o tachar items.
+                   Ejemplos: "agregá leche", "¿qué falta comprar?", "comprar pan y huevos"
+   - "unknown"   : no podés determinar la intención con certeza
+
+   IMPORTANTE: Nunca uses "unknown" si el mensaje claramente habla de calendario, viajes o compras.
+   La categoría "query" NO EXISTE — toda consulta cae en schedule, logistics o shopping según el tema.
 
 2. Extraer ENTIDADES según la intención:
    - schedule  → { "title": str, "date": str, "time": str, "location": str, "people": [str] }
    - logistics → { "destination": str, "event_time": str, "origin": str }
    - shopping  → { "items": [{"name": str, "quantity": str, "unit": str}] }
-   - query     → { "topic": str }
 
-3. Responder en español rioplatense informal.
+3. Responder en español rioplatense informal y breve.
 
 Devolvé SIEMPRE JSON sin markdown:
 {
@@ -48,7 +53,7 @@ Devolvé SIEMPRE JSON sin markdown:
   "confidence": <0.0-1.0>,
   "entities": { ... },
   "summary": "<resumen breve>",
-  "response": "<respuesta directa si podés resolverlo sin sub-agentes, o null>"
+  "response": "<respuesta directa solo si podés resolver sin sub-agentes, o null>"
 }
 """
 
@@ -145,8 +150,7 @@ async def build_response(state: IntakeState) -> Dict[str, Any]:
         IntentType.SCHEDULE:  "Voy a revisar el calendario ahora.",
         IntentType.LOGISTICS: "Calculo el tiempo de viaje y te aviso.",
         IntentType.SHOPPING:  "Listo, actualicé la lista.",
-        IntentType.QUERY:     "Déjame consultar y te respondo.",
-        IntentType.UNKNOWN:   "No entendí bien. ¿Podés reformular?",
+        IntentType.UNKNOWN:   "No entendí bien. ¿Podés reformular con más detalle?",
     }
     return {"response_text": fallbacks.get(intent, "Procesando tu solicitud…")}
 
@@ -163,7 +167,6 @@ async def determine_route(state: IntakeState) -> str:
         IntentType.SHOPPING:  "handle_shopping",
         IntentType.SCHEDULE:  "handle_schedule",
         IntentType.LOGISTICS: "handle_logistics",
-        IntentType.QUERY:     "build_response",
         IntentType.UNKNOWN:   "build_response",
     }
     return route_map.get(intent, "build_response")
