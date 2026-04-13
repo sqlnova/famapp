@@ -240,9 +240,58 @@
         <p class="text-center text-gray-400 text-xs mt-4">Tocá el círculo para tachar un ítem</p>
       </div>
 
+      <!-- ── Lugares ── -->
+      <div x-show="view === 'places'" class="px-4 pt-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-1">📍 Lugares frecuentes</h2>
+        <p class="text-gray-400 text-xs mb-4">El agente usa estas direcciones cuando decís "colegio", "club", etc.</p>
+
+        <!-- Agregar nuevo lugar -->
+        <div class="bg-white rounded-2xl p-4 mb-4 shadow-sm">
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Agregar / actualizar lugar</p>
+          <div class="space-y-2">
+            <input x-model="newPlace.alias" placeholder='Nombre corto (ej: "colegio", "club")'
+              class="w-full px-3 py-2.5 rounded-xl border border-gray-100 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300">
+            <input x-model="newPlace.name" placeholder='Nombre completo (ej: "Club Regatas Resistencia")'
+              class="w-full px-3 py-2.5 rounded-xl border border-gray-100 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300">
+            <input x-model="newPlace.address" placeholder='Dirección completa (ej: "Av Ávalos 1085, Resistencia")'
+              class="w-full px-3 py-2.5 rounded-xl border border-gray-100 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300">
+          </div>
+          <p x-show="placeError" x-text="placeError" class="text-red-400 text-xs mt-2"></p>
+          <button @click="savePlace()" :disabled="savingPlace"
+            class="mt-3 w-full bg-orange-500 hover:bg-orange-600 text-white py-2.5 rounded-xl text-sm font-semibold transition disabled:opacity-60">
+            <span x-show="!savingPlace">Guardar lugar</span>
+            <span x-show="savingPlace">Guardando…</span>
+          </button>
+        </div>
+
+        <!-- Lista de lugares -->
+        <div x-show="places.length === 0" class="text-center py-10 text-gray-400">
+          <div class="text-4xl mb-3">🗺️</div>
+          <p class="text-sm">Sin lugares guardados todavía</p>
+          <p class="text-xs mt-1">También podés decirle al asistente:<br>"el colegio es en Av. X 123"</p>
+        </div>
+        <template x-for="p in places" :key="p.alias">
+          <div class="bg-white rounded-2xl p-4 mb-2 shadow-sm flex items-start gap-3">
+            <div class="text-2xl mt-0.5">📍</div>
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-gray-800" x-text="p.alias"></p>
+              <p class="text-gray-500 text-sm" x-text="p.name"></p>
+              <p class="text-gray-400 text-xs mt-0.5 truncate" x-text="p.address"></p>
+            </div>
+            <button @click="deletePlace(p.alias)"
+              class="text-gray-300 hover:text-red-400 transition flex-shrink-0 p-1">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        </template>
+      </div>
+
       <!-- ── Familia ── -->
       <div x-show="view === 'family'" class="px-4 pt-6">
-        <h2 class="text-xl font-bold text-gray-800 mb-4">👥 Familia</h2>
+        <h2 class="text-xl font-bold text-gray-800 mb-1">👥 Familia</h2>
+        <p class="text-gray-400 text-xs mb-4">Activá "menor" para que el agente aplique la regla llevar+retirar automáticamente.</p>
         <div x-show="family.length === 0" class="text-center py-12 text-gray-400">
           <div class="text-4xl mb-3">👤</div>
           <p>No hay miembros registrados.<br><span class="text-xs">Agregá desde Supabase → family_members</span></p>
@@ -256,6 +305,13 @@
               <p class="text-orange-500 text-sm" x-text="`@${m.nickname}`"></p>
               <p class="text-gray-400 text-xs truncate" x-text="m.whatsapp_number"></p>
             </div>
+            <!-- Minor toggle -->
+            <button @click="toggleMinor(m)" :title="m.is_minor ? 'Es menor — clic para desactivar' : 'Marcar como menor'"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition flex-shrink-0"
+              :class="m.is_minor ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400 hover:bg-blue-50 hover:text-blue-400'">
+              <span>🧒</span>
+              <span x-text="m.is_minor ? 'Menor' : 'Adulto'"></span>
+            </button>
           </div>
         </template>
       </div>
@@ -294,11 +350,13 @@
           { id: 'home',     icon: '🏠', label: 'Inicio' },
           { id: 'calendar', icon: '📅', label: 'Agenda' },
           { id: 'shopping', icon: '🛒', label: 'Compras' },
+          { id: 'places',   icon: '📍', label: 'Lugares' },
           { id: 'family',   icon: '👥', label: 'Familia' },
         ],
         email: '', password: '', authError: '', loggingIn: false,
-        events: [], shopping: [], family: [],
+        events: [], shopping: [], family: [], places: [],
         markingDone: null,
+        newPlace: { alias: '', name: '', address: '' }, savingPlace: false, placeError: '',
 
         async init() {
           const { data: { session } } = await sb.auth.getSession()
@@ -317,11 +375,11 @@
 
         async logout() {
           await sb.auth.signOut()
-          this.user = null; this.token = null; this.events = []; this.shopping = []; this.family = []
+          this.user = null; this.token = null; this.events = []; this.shopping = []; this.family = []; this.places = []
         },
 
         async loadData() {
-          await Promise.all([this.loadEvents(), this.loadShopping(), this.loadFamily()])
+          await Promise.all([this.loadEvents(), this.loadShopping(), this.loadFamily(), this.loadPlaces()])
         },
 
         async api(path, opts = {}) {
@@ -336,6 +394,53 @@
         async loadEvents()   { const d = await this.api('/events');   if (d) this.events = d },
         async loadShopping() { const d = await this.api('/shopping'); if (d) this.shopping = d },
         async loadFamily()   { const d = await this.api('/family');   if (d) this.family = d },
+        async loadPlaces()   { const d = await this.api('/places');   if (d) this.places = d },
+
+        async toggleMinor(member) {
+          member.is_minor = !member.is_minor
+          await this.api(`/family/${member.id}/minor`, { method: 'PUT', body: JSON.stringify({ is_minor: member.is_minor }) })
+        },
+
+        async savePlace() {
+          this.placeError = ''
+          const { alias, name, address } = this.newPlace
+          if (!alias.trim() || !address.trim()) { this.placeError = 'Nombre corto y dirección son obligatorios'; return }
+          this.savingPlace = true
+          const d = await this.api('/places', { method: 'POST', body: JSON.stringify({ alias: alias.trim().toLowerCase(), name: name.trim() || alias.trim(), address: address.trim() }) })
+          if (d) { await this.loadPlaces(); this.newPlace = { alias: '', name: '', address: '' } }
+          this.savingPlace = false
+        },
+
+        async deletePlace(alias) {
+          if (!confirm(`¿Eliminar "${alias}"?`)) return
+          await this.api(`/places/${alias}`, { method: 'DELETE' })
+          this.places = this.places.filter(p => p.alias !== alias)
+        },
+        async loadPlaces()   { const d = await this.api('/places');   if (d) this.places = d },
+
+        async savePlace() {
+          if (!this.newPlace.alias || !this.newPlace.address) { this.placeError = 'Alias y dirección son obligatorios'; return }
+          this.savingPlace = true; this.placeError = ''
+          const d = await this.api('/places', { method: 'POST', body: JSON.stringify(this.newPlace) })
+          if (d) {
+            const idx = this.places.findIndex(p => p.alias === d.alias)
+            if (idx >= 0) this.places[idx] = d; else this.places.push(d)
+            this.places = [...this.places].sort((a,b) => a.alias.localeCompare(b.alias))
+            this.newPlace = { alias: '', name: '', address: '' }
+          }
+          this.savingPlace = false
+        },
+
+        async deletePlace(alias) {
+          if (!confirm(`¿Eliminar "${alias}"?`)) return
+          await this.api(`/places/${alias}`, { method: 'DELETE' })
+          this.places = this.places.filter(p => p.alias !== alias)
+        },
+
+        async toggleMinor(member) {
+          member.is_minor = !member.is_minor
+          await this.api(`/family/${member.id}/minor`, { method: 'PUT', body: JSON.stringify({ is_minor: member.is_minor }) })
+        },
 
         async markDone(id) {
           this.markingDone = id

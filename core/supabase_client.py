@@ -9,7 +9,7 @@ import structlog
 from supabase import Client, create_client
 
 from core.config import get_settings
-from core.models import FamilyMember, MessageRecord, MessageStatus, ShoppingItem
+from core.models import FamilyMember, KnownPlace, MessageRecord, MessageStatus, ShoppingItem
 
 logger = structlog.get_logger(__name__)
 
@@ -92,6 +92,13 @@ def get_family_members() -> List[FamilyMember]:
     return [FamilyMember(**r) for r in result.data]
 
 
+def get_minor_members() -> List[FamilyMember]:
+    """Return family members marked as minors."""
+    client = get_supabase()
+    result = client.table("family_members").select("*").eq("is_minor", True).execute()
+    return [FamilyMember(**r) for r in result.data]
+
+
 def get_family_member_by_nickname(nickname: str) -> Optional[FamilyMember]:
     """Look up a family member by their nickname (case-insensitive)."""
     client = get_supabase()
@@ -103,3 +110,44 @@ def get_family_member_by_nickname(nickname: str) -> Optional[FamilyMember]:
         .execute()
     )
     return FamilyMember(**result.data[0]) if result.data else None
+
+
+# ── Known places ──────────────────────────────────────────────────────────────
+
+def get_known_places_dict() -> Dict[str, KnownPlace]:
+    """Return {alias: KnownPlace} for fast lookup. Aliases are lowercase."""
+    client = get_supabase()
+    result = client.table("known_places").select("*").order("alias").execute()
+    return {r["alias"].lower(): KnownPlace(**r) for r in result.data}
+
+
+def get_all_known_places() -> List[KnownPlace]:
+    """Return all known places ordered by alias."""
+    client = get_supabase()
+    result = client.table("known_places").select("*").order("alias").execute()
+    return [KnownPlace(**r) for r in result.data]
+
+
+def upsert_known_place(alias: str, name: str, address: str) -> KnownPlace:
+    """Insert or update a known place by alias."""
+    client = get_supabase()
+    result = client.table("known_places").upsert(
+        {"alias": alias.lower().strip(), "name": name.strip(), "address": address.strip()},
+        on_conflict="alias",
+    ).execute()
+    return KnownPlace(**result.data[0])
+
+
+def delete_known_place(alias: str) -> bool:
+    """Delete a known place by alias. Returns True if a row was deleted."""
+    client = get_supabase()
+    result = client.table("known_places").delete().eq("alias", alias.lower().strip()).execute()
+    return len(result.data) > 0
+
+
+def resolve_place_address(location: str, places: Dict[str, KnownPlace]) -> str:
+    """If location matches a known alias, return its address. Otherwise return as-is."""
+    if not location:
+        return location
+    key = location.strip().lower()
+    return places[key].address if key in places else location

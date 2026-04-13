@@ -42,6 +42,13 @@ Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
    - "shopping"  : lista de compras — agregar, consultar o tachar items.
                    Ejemplos: "agregá leche", "¿qué falta comprar?", "comprar pan y huevos",
                              "tachá la leche", "ya compré el pan", "marca el aceite como comprado"
+   - "places"   : guardar o consultar los lugares frecuentes de la familia.
+                   Guardá cuando el usuario registre una dirección con un nombre corto, o cuando
+                   aclare "cada vez que diga X me refiero a Y".
+                   Ejemplos: "el colegio es en Av. San Martín 123, Resistencia",
+                             "guarda que el club es en Av Ávalos 1085",
+                             "cada vez que diga supermercado es el Jumbo de Av. Alberdi 200",
+                             "¿qué lugares tenemos guardados?"
    - "unknown"   : no podés determinar la intención con certeza
 
    REGLA CLAVE: Si el mensaje menciona a una persona que va a algún lugar a una hora específica
@@ -59,6 +66,12 @@ Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
        "items": [{"name": str, "quantity": str, "unit": str}]
      }
      Para "mark_done" los items contienen solo el nombre de lo que ya se compró.
+   - places    → {
+       "action": "save" | "list",
+       "alias": str,    // nombre corto en minúsculas sin tildes: "colegio", "club"
+       "name":  str,    // nombre descriptivo completo (puede ser null)
+       "address": str   // dirección completa (puede ser null si action es "list")
+     }
 
 3. Responder en español rioplatense informal y breve.
 
@@ -153,6 +166,30 @@ async def handle_schedule(state: IntakeState) -> Dict[str, Any]:
     return {"response_text": response_text, "route_to": "schedule"}
 
 
+async def handle_places(state: IntakeState) -> Dict[str, Any]:
+    """Save or list known family places."""
+    from core.supabase_client import get_all_known_places, upsert_known_place
+
+    entities = state.get("entities", {})
+    action = entities.get("action", "list")
+    alias = (entities.get("alias") or "").strip().lower()
+    name = (entities.get("name") or alias).strip()
+    address = (entities.get("address") or "").strip()
+
+    if action == "save":
+        if not alias or not address:
+            return {"response_text": "Necesito el nombre corto y la dirección. Ej: 'el colegio es en Av. X 123, Resistencia'"}
+        upsert_known_place(alias, name or alias, address)
+        return {"response_text": f"✅ Guardé *{alias}* → {address}"}
+
+    # list
+    places = get_all_known_places()
+    if not places:
+        return {"response_text": "No tenés lugares guardados todavía.\nEjemplo: 'el colegio es en Av. X 123, Resistencia'"}
+    lines = [f"• *{p.alias}*: {p.name}\n  📍 {p.address}" for p in places]
+    return {"response_text": "📍 *Lugares guardados:*\n" + "\n".join(lines)}
+
+
 async def handle_logistics(state: IntakeState) -> Dict[str, Any]:
     """Delegate to the Logistics Agent (Google Maps)."""
     from agents.logistics import handle_logistics_query
@@ -191,6 +228,7 @@ async def determine_route(state: IntakeState) -> str:
         IntentType.SHOPPING:  "handle_shopping",
         IntentType.SCHEDULE:  "handle_schedule",
         IntentType.LOGISTICS: "handle_logistics",
+        IntentType.PLACES:    "handle_places",
         IntentType.UNKNOWN:   "build_response",
     }
     return route_map.get(intent, "build_response")

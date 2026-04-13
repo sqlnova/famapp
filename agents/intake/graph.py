@@ -10,6 +10,7 @@ from agents.intake.nodes import (
     build_response,
     determine_route,
     handle_logistics,
+    handle_places,
     handle_schedule,
     handle_shopping,
     parse_and_classify,
@@ -29,6 +30,7 @@ def build_intake_graph() -> StateGraph:
     graph.add_node("handle_shopping",   handle_shopping)
     graph.add_node("handle_schedule",   handle_schedule)
     graph.add_node("handle_logistics",  handle_logistics)
+    graph.add_node("handle_places",     handle_places)
     graph.add_node("build_response",    build_response)
 
     graph.add_edge(START, "parse_and_classify")
@@ -40,6 +42,7 @@ def build_intake_graph() -> StateGraph:
             "handle_shopping":  "handle_shopping",
             "handle_schedule":  "handle_schedule",
             "handle_logistics": "handle_logistics",
+            "handle_places":    "handle_places",
             "build_response":   "build_response",
         },
     )
@@ -47,6 +50,7 @@ def build_intake_graph() -> StateGraph:
     graph.add_edge("handle_shopping",  "build_response")
     graph.add_edge("handle_schedule",  "build_response")
     graph.add_edge("handle_logistics", "build_response")
+    graph.add_edge("handle_places",    "build_response")
     graph.add_edge("build_response",   END)
 
     return graph.compile()
