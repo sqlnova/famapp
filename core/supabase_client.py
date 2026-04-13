@@ -9,7 +9,7 @@ import structlog
 from supabase import Client, create_client
 
 from core.config import get_settings
-from core.models import MessageRecord, MessageStatus, ShoppingItem
+from core.models import FamilyMember, MessageRecord, MessageStatus, ShoppingItem
 
 logger = structlog.get_logger(__name__)
 
@@ -81,3 +81,25 @@ async def mark_shopping_items_done_by_names(names: List[str]) -> int:
         )
         total += len(result.data)
     return total
+
+
+# ── Family members ────────────────────────────────────────────────────────────
+
+def get_family_members() -> List[FamilyMember]:
+    """Return all registered family members."""
+    client = get_supabase()
+    result = client.table("family_members").select("*").execute()
+    return [FamilyMember(**r) for r in result.data]
+
+
+def get_family_member_by_nickname(nickname: str) -> Optional[FamilyMember]:
+    """Look up a family member by their nickname (case-insensitive)."""
+    client = get_supabase()
+    result = (
+        client.table("family_members")
+        .select("*")
+        .ilike("nickname", nickname.strip())
+        .limit(1)
+        .execute()
+    )
+    return FamilyMember(**result.data[0]) if result.data else None

@@ -43,6 +43,12 @@ Para "recurring_create", el usuario quiere cargar un horario que se repite seman
 - "end_time"   : hora de fin HH:MM (null → 1 hora después)
 - Ejemplos de trigger: "horario del colegio", "clases de natación", "reunion semanal"
 
+Campo "responsible" (aplica a create y recurring_create):
+- Extraé el apodo/nombre en minúsculas de quien está a cargo del evento.
+- Ejemplos: "el papá lleva" → "papa" / "yo los busco" → "mama" / "llevo yo" → "mama"
+- Si no se menciona responsable, dejá null.
+- Usá siempre minúsculas sin tildes: "papa", "mama", "sofia", etc.
+
 Respondé SIEMPRE en JSON sin markdown:
 {{
   "action": "list" | "create" | "recurring_create",
@@ -52,6 +58,7 @@ Respondé SIEMPRE en JSON sin markdown:
     "time": "HH:MM",
     "duration_minutes": int,
     "location": str | null,
+    "responsible": str | null,
     "start_date": "YYYY-MM-DD",
     "until_date": "YYYY-MM-DD",
     "days_of_week": ["MO", "TU", ...],
@@ -111,6 +118,7 @@ async def handle_schedule(
             date_str = ev_data.get("date", datetime.now().strftime("%Y-%m-%d"))
             time_str = ev_data.get("time", "09:00")
             duration = int(ev_data.get("duration_minutes", 60))
+            responsible = ev_data.get("responsible") or None
 
             start_local = AR_TZ.localize(datetime.fromisoformat(f"{date_str}T{time_str}:00"))
             end_local = start_local + timedelta(minutes=duration)
@@ -120,10 +128,12 @@ async def handle_schedule(
                 start=start_local,
                 end=end_local,
                 location=ev_data.get("location"),
+                responsible_nickname=responsible,
             )
             created = create_event(event)
             date_fmt = start_local.strftime("%-d/%-m a las %H:%M")
-            return f"✅ Evento creado: *{created.title}* para el {date_fmt}."
+            resp_note = f" (responsable: {responsible})" if responsible else ""
+            return f"✅ Evento creado: *{created.title}* para el {date_fmt}.{resp_note}"
 
         elif action == "recurring_create":
             ev_data = plan.get("event", {})
@@ -133,6 +143,7 @@ async def handle_schedule(
             days_of_week: List[str] = ev_data.get("days_of_week", [])
             start_time = ev_data.get("start_time", "09:00")
             end_time = ev_data.get("end_time")
+            responsible = ev_data.get("responsible") or None
 
             if not days_of_week:
                 return "No entendí los días de la semana. ¿Me podés decir cuándo se repite?"
@@ -154,6 +165,7 @@ async def handle_schedule(
                 start=start_local,
                 end=end_local,
                 location=ev_data.get("location"),
+                responsible_nickname=responsible,
             )
             created = create_event(event, recurrence=[rrule])
 
@@ -163,11 +175,13 @@ async def handle_schedule(
             }
             days_es = ", ".join(day_names.get(d, d) for d in days_of_week)
             time_range = f"{start_time}–{end_time}" if end_time else start_time
+            resp_line = f"\n👤 Responsable: {responsible}" if responsible else ""
 
             return (
                 f"✅ Horario recurrente creado: *{created.title}*\n"
                 f"📅 {days_es.capitalize()}, {time_range}\n"
                 f"🔁 Hasta el {until_date}"
+                f"{resp_line}"
             )
 
         else:

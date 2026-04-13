@@ -14,7 +14,7 @@ from agents.logistics.maps_client import get_travel_time
 from agents.schedule.calendar_client import AR_TZ, get_events_in_window
 from core.config import get_settings
 from core.models import CalendarEvent
-from core.supabase_client import get_supabase
+from core.supabase_client import get_family_member_by_nickname, get_supabase
 from core.whatsapp import broadcast_whatsapp_message
 
 logger = structlog.get_logger(__name__)
@@ -36,10 +36,23 @@ def _alert_already_scheduled(calendar_event_id: str) -> bool:
     return len(result.data) > 0
 
 
+def _resolve_responsible_whatsapp(event: CalendarEvent) -> Optional[str]:
+    """Return the WhatsApp number of the event's responsible person, or None."""
+    if not event.responsible_nickname:
+        return None
+    try:
+        member = get_family_member_by_nickname(event.responsible_nickname)
+        return member.whatsapp_number if member else None
+    except Exception:
+        logger.warning("responsible_lookup_failed", nickname=event.responsible_nickname)
+        return None
+
+
 def _save_alert(
     event: CalendarEvent,
     scheduled_send: datetime,
     travel_minutes: int,
+    responsible_whatsapp: Optional[str] = None,
 ) -> None:
     s = get_settings()
     client = get_supabase()
@@ -51,6 +64,7 @@ def _save_alert(
         "scheduled_send": scheduled_send.isoformat(),
         "sent": False,
         "send_to": s.phone_list,
+        "responsible_whatsapp": responsible_whatsapp,
     }).execute()
     logger.info(
         "logistics_alert_saved",
@@ -80,6 +94,7 @@ async def _process_event(event: CalendarEvent) -> None:
 
     s = get_settings()
     now = datetime.now(timezone.utc)
+    responsible_wa = _resolve_responsible_whatsapp(event)
 
     try:
         travel = get_travel_time(
@@ -99,17 +114,22 @@ async def _process_event(event: CalendarEvent) -> None:
         # Too late to schedule – send immediately if leave_at is still in the future
         if leave_at > now:
             minutes_left = int((leave_at - now).total_seconds() / 60)
-            _fire_alert(event, travel.duration_minutes, minutes_left)
-            _save_alert(event, now, travel.duration_minutes)
+            _fire_alert(event, travel.duration_minutes, minutes_left, responsible_wa)
+            _save_alert(event, now, travel.duration_minutes, responsible_wa)
         return
 
     # Schedule future alert
-    _save_alert(event, send_at, travel.duration_minutes)
+    _save_alert(event, send_at, travel.duration_minutes, responsible_wa)
     logger.info("logistics_alert_scheduled", event=event.title, send_at=send_at.isoformat())
 
 
-def _fire_alert(event: CalendarEvent, travel_minutes: int, leave_in_minutes: int) -> None:
-    """Send the proactive WhatsApp departure alert."""
+def _fire_alert(
+    event: CalendarEvent,
+    travel_minutes: int,
+    leave_in_minutes: int,
+    responsible_wa: Optional[str] = None,
+) -> None:
+    """Send the proactive WhatsApp departure alert to the responsible person (or everyone)."""
     travel_str = (
         f"{travel_minutes} min"
         if travel_minutes < 60
@@ -131,8 +151,14 @@ def _fire_alert(event: CalendarEvent, travel_minutes: int, leave_in_minutes: int
         f"📍 {event.location}\n"
         f"⏱ Tiempo de viaje: {travel_str} (con tráfico)"
     )
-    broadcast_whatsapp_message(msg)
-    logger.info("logistics_alert_fired", event=event.title, leave_in=leave_in_minutes)
+    recipients = [responsible_wa] if responsible_wa else None
+    broadcast_whatsapp_message(msg, recipients=recipients)
+    logger.info(
+        "logistics_alert_fired",
+        event=event.title,
+        leave_in=leave_in_minutes,
+        recipient=responsible_wa or "all",
+    )
 
 
 # ── Scheduler job ─────────────────────────────────────────────────────────────
@@ -158,7 +184,10 @@ async def check_and_send_due_alerts() -> None:
                 start_dt = datetime.fromisoformat(event_start_raw).astimezone(AR_TZ)
                 event_time_str = start_dt.strftime("%H:%M")
 
-            send_to = row.get("send_to") or []
+            # Prefer the responsible person; fall back to all family members
+            responsible_wa = row.get("responsible_whatsapp")
+            recipients = [responsible_wa] if responsible_wa else (row.get("send_to") or None)
+
             msg = (
                 f"🚗 *¡Es hora de salir!*\n"
                 f"📅 {event_title}"
@@ -166,9 +195,14 @@ async def check_and_send_due_alerts() -> None:
                 + f"\n📍 {destination}\n"
                 f"⏱ Recordá salir con tiempo suficiente."
             )
-            broadcast_whatsapp_message(msg, recipients=send_to if send_to else None)
+            broadcast_whatsapp_message(msg, recipients=recipients)
             _mark_alert_sent(row["calendar_event_id"])
-            logger.info("logistics_due_alert_sent", event=event_title, destination=destination)
+            logger.info(
+                "logistics_due_alert_sent",
+                event=event_title,
+                destination=destination,
+                recipient=responsible_wa or "all",
+            )
         except Exception:
             logger.exception("logistics_due_alert_error", row_id=row.get("id"))
 

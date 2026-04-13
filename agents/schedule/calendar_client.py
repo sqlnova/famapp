@@ -1,6 +1,7 @@
 """Google Calendar client using service account credentials."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -34,6 +35,21 @@ def _to_utc_rfc3339(dt: datetime) -> str:
     return dt.isoformat()
 
 
+_RESPONSIBLE_TAG_RE = re.compile(r"\[responsable:([^\]]+)\]", re.IGNORECASE)
+
+
+def _extract_responsible(description: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Return (clean_description, responsible_nickname) after stripping the tag."""
+    if not description:
+        return description, None
+    m = _RESPONSIBLE_TAG_RE.search(description)
+    if not m:
+        return description, None
+    nickname = m.group(1).strip()
+    clean = description[:m.start()].rstrip() or None
+    return clean, nickname
+
+
 def _parse_event(raw: dict) -> CalendarEvent:
     """Parse a raw Google Calendar API event dict into a CalendarEvent."""
     start_raw = raw.get("start", {})
@@ -45,16 +61,20 @@ def _parse_event(raw: dict) -> CalendarEvent:
         # All-day event
         return datetime.fromisoformat(d["date"] + "T00:00:00+00:00")
 
+    raw_desc = raw.get("description")
+    clean_desc, responsible = _extract_responsible(raw_desc)
+
     return CalendarEvent(
         id=raw.get("id"),
         title=raw.get("summary", "(sin título)"),
         start=parse_dt(start_raw),
         end=parse_dt(end_raw),
         location=raw.get("location"),
-        description=raw.get("description"),
+        description=clean_desc,
         attendees=[
             a["email"] for a in raw.get("attendees", []) if not a.get("self")
         ],
+        responsible_nickname=responsible,
     )
 
 
@@ -145,8 +165,12 @@ def create_event(
     }
     if event.location:
         body["location"] = event.location
-    if event.description:
-        body["description"] = event.description
+    # Build description: user text + optional [responsable:nick] tag
+    desc_parts = [event.description] if event.description else []
+    if event.responsible_nickname:
+        desc_parts.append(f"[responsable:{event.responsible_nickname}]")
+    if desc_parts:
+        body["description"] = "\n".join(desc_parts)
     if event.attendees:
         body["attendees"] = [{"email": a} for a in event.attendees]
     if recurrence:

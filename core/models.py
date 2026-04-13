@@ -82,6 +82,16 @@ class CalendarEvent(BaseModel):
     location: Optional[str] = None
     description: Optional[str] = None
     attendees: List[str] = Field(default_factory=list)
+    responsible_nickname: Optional[str] = None  # slug from family_members table
+
+
+# ── Family ────────────────────────────────────────────────────────────────────
+
+class FamilyMember(BaseModel):
+    id: Optional[UUID] = None
+    name: str           # display: "Papá", "Mamá"
+    nickname: str       # slug used in events: "papa", "mama"
+    whatsapp_number: str  # whatsapp:+54911...
 
 
 # ── Shopping ──────────────────────────────────────────────────────────────────
