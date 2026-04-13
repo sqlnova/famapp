@@ -1,4 +1,8 @@
-"""FamApp entry point – starts the FastAPI server."""
+"""FamApp entry point – starts the FastAPI server.
+
+In production (Railway), the app is started via the Procfile using uvicorn directly.
+This file is used for local development only.
+"""
 from __future__ import annotations
 
 import logging
@@ -33,15 +37,12 @@ if __name__ == "__main__":
     configure_logging(s.log_level)
     logger = structlog.get_logger(__name__)
 
-    # PaaS platforms (Railway, Render, Fly.io) inject PORT dynamically
     port = int(os.environ.get("PORT", 8000))
+    logger.info("famapp_starting", env=s.app_env, port=port)
 
-    # Never use reload inside a container — it causes 502s due to process
-    # management conflicts with the PaaS reverse proxy
-    running_in_container = "RAILWAY_ENVIRONMENT" in os.environ or "PORT" in os.environ
-    reload = False if running_in_container else not s.is_production
-
-    logger.info("famapp_starting", env=s.app_env, port=port, reload=reload)
+    # Never use reload in containers – causes 502s with Railway's reverse proxy
+    in_container = "RAILWAY_ENVIRONMENT" in os.environ or "PORT" in os.environ
+    reload = not in_container and not s.is_production
 
     uvicorn.run(
         "server.webhook:app",
