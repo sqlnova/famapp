@@ -35,9 +35,13 @@ Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
                    Ejemplos: "¿qué tengo mañana?", "agendame el dentista", "mañana papá lleva a los chicos al club a las 16",
                              "Giuseppe y papá tienen que estar en el aeropuerto a las 20:20, lleva mamá",
                              "hoy papá lleva a Gaetano al colegio a las 8:30"
-   - "logistics" : SOLO cuando se hace una PREGUNTA explícita sobre tiempo de viaje, tráfico o cómo llegar.
-                   Ejemplos: "¿cuánto tardo en llegar a Palermo?", "¿a qué hora salgo para llegar a tiempo?",
-                             "¿cuánto hay de acá al aeropuerto?"
+   - "logistics" : preguntas sobre tiempo de viaje/tráfico, O cuando el usuario pide que se le avise
+                   antes de un evento específico (incluso recurrente).
+                   Ejemplos travel_time: "¿cuánto tardo en llegar a Palermo?", "¿a qué hora salgo?"
+                   Ejemplos request_alert: "avisame antes del colegio de mañana",
+                             "quiero notificación para el club del jueves",
+                             "recordame salir para el dentista del viernes",
+                             "avisame para llevar a Gaetano al colegio el lunes"
                    NO uses "logistics" cuando el usuario simplemente enuncia un plan o evento futuro.
    - "shopping"  : lista de compras — agregar, consultar o tachar items.
                    Ejemplos: "agregá leche", "¿qué falta comprar?", "comprar pan y huevos",
@@ -60,7 +64,14 @@ Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
 
 2. Extraer ENTIDADES según la intención:
    - schedule  → { "title": str, "date": str, "time": str, "location": str, "people": [str] }
-   - logistics → { "destination": str, "event_time": str, "origin": str }
+   - logistics → {
+       "action": "travel_time" | "request_alert",
+       // travel_time:
+       "destination": str, "event_time": str, "origin": str,
+       // request_alert:
+       "event_name": str,   // nombre del evento o lugar (ej: "colegio", "club", "dentista")
+       "date": "YYYY-MM-DD" // fecha del evento; null = próxima ocurrencia
+     }
    - shopping  → {
        "action": "add" | "list" | "mark_done",
        "items": [{"name": str, "quantity": str, "unit": str}]

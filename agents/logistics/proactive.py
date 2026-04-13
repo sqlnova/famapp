@@ -87,6 +87,62 @@ def _mark_alert_sent(calendar_event_id: str) -> None:
 
 # ── Core logic ────────────────────────────────────────────────────────────────
 
+async def schedule_manual_alert(event: CalendarEvent) -> str:
+    """Schedule a departure alert for any event, bypassing the alerts_enabled flag.
+
+    Used when the user explicitly requests a reminder for a recurring event instance.
+    Returns a human-readable confirmation or error message.
+    """
+    if not event.location:
+        return f"El evento *{event.title}* no tiene dirección guardada, no puedo calcular el tiempo de viaje."
+
+    if not event.id:
+        return "No pude identificar el evento en el calendario."
+
+    if _alert_already_scheduled(event.id):
+        local = event.start.astimezone(AR_TZ)
+        return f"Ya tenés una alerta agendada para *{event.title}* el {local.strftime('%-d/%-m a las %H:%M')}."
+
+    s = get_settings()
+    now = datetime.now(timezone.utc)
+    responsible_wa = _resolve_responsible_whatsapp(event)
+
+    try:
+        travel = get_travel_time(destination=event.location, departure_time=now)
+    except Exception:
+        logger.exception("manual_alert_maps_error", event=event.title, location=event.location)
+        return f"No pude calcular el tiempo de viaje a '{event.location}'. Intentá de nuevo."
+
+    travel_td = timedelta(minutes=travel.duration_minutes)
+    leave_at = event.start - travel_td
+    prep_buffer = timedelta(minutes=s.logistics_buffer_minutes)
+    send_at = leave_at - prep_buffer
+
+    local_event = event.start.astimezone(AR_TZ)
+    local_leave = leave_at.astimezone(AR_TZ)
+    local_alert = send_at.astimezone(AR_TZ)
+
+    if send_at <= now:
+        if leave_at > now:
+            minutes_left = int((leave_at - now).total_seconds() / 60)
+            _fire_alert(event, travel.duration_minutes, minutes_left, responsible_wa)
+            _save_alert(event, now, travel.duration_minutes, leave_at, responsible_wa)
+            return (
+                f"✅ *¡Alerta enviada ahora!*\n"
+                f"📅 {event.title} a las {local_event.strftime('%H:%M')}\n"
+                f"🕐 Tenés que salir en {minutes_left} min"
+            )
+        return f"Ya pasó la hora de salir para *{event.title}*."
+
+    _save_alert(event, send_at, travel.duration_minutes, leave_at, responsible_wa)
+    logger.info("manual_alert_scheduled", event=event.title, send_at=send_at.isoformat())
+    return (
+        f"✅ Te aviso a las *{local_alert.strftime('%H:%M')}*\n"
+        f"📅 {event.title} · {local_event.strftime('%-d/%-m a las %H:%M')}\n"
+        f"🕐 Salís a las {local_leave.strftime('%H:%M')} · ⏱ {travel.duration_minutes} min de tráfico"
+    )
+
+
 async def _process_event(event: CalendarEvent) -> None:
     """For a single calendar event, calculate travel time and fire alert if needed."""
     if not event.location or not event.id:
