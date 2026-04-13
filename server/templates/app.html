@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>FamApp</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { DEFAULT: '#F97316', 50: '#FFF7ED', 100: '#FFEDD5', 500: '#F97316', 600: '#EA580C' }
+          },
+          fontFamily: { sans: ['-apple-system','BlinkMacSystemFont','Segoe UI','Roboto','sans-serif'] }
+        }
+      }
+    }
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 16px); }
+  </style>
+</head>
+<body class="bg-orange-50 min-h-screen" x-data="famapp()" x-init="init()" x-cloak>
+
+  <!-- ── Loading ─────────────────────────────────────────── -->
+  <div x-show="loading" class="fixed inset-0 flex items-center justify-center bg-orange-50 z-50">
+    <div class="text-center">
+      <div class="text-6xl mb-4 animate-bounce">🏡</div>
+      <p class="text-orange-400 font-medium">Cargando FamApp…</p>
+    </div>
+  </div>
+
+  <!-- ── Login ───────────────────────────────────────────── -->
+  <div x-show="!loading && !user" class="flex items-center justify-center min-h-screen p-6">
+    <div class="w-full max-w-sm">
+      <div class="text-center mb-10">
+        <div class="text-7xl mb-3">🏡</div>
+        <h1 class="text-3xl font-bold text-gray-800">FamApp</h1>
+        <p class="text-gray-400 mt-1">Tu familia conectada</p>
+      </div>
+      <div class="bg-white rounded-3xl shadow-sm p-8">
+        <form @submit.prevent="login()">
+          <div class="mb-4">
+            <input type="email" x-model="email" placeholder="Email"
+              class="w-full px-4 py-3.5 rounded-2xl border border-gray-100 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-orange-300 text-gray-800 transition">
+          </div>
+          <div class="mb-6">
+            <input type="password" x-model="password" placeholder="Contraseña"
+              class="w-full px-4 py-3.5 rounded-2xl border border-gray-100 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-orange-300 text-gray-800 transition">
+          </div>
+          <p x-show="authError" x-text="authError" class="text-red-400 text-sm mb-4 text-center"></p>
+          <button type="submit" :disabled="loggingIn"
+            class="w-full bg-orange-500 hover:bg-orange-600 text-white py-3.5 rounded-2xl font-semibold transition disabled:opacity-60 shadow-sm">
+            <span x-show="!loggingIn">Ingresar</span>
+            <span x-show="loggingIn">Ingresando…</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── App ─────────────────────────────────────────────── -->
+  <div x-show="!loading && user" class="flex flex-col min-h-screen">
+
+    <!-- Top bar -->
+    <header class="bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between sticky top-0 z-10">
+      <div>
+        <h1 class="font-bold text-gray-800 text-lg leading-none">🏡 FamApp</h1>
+        <p class="text-gray-400 text-xs mt-0.5" x-text="greeting()"></p>
+      </div>
+      <div class="flex items-center gap-3">
+        <button @click="loadData()" title="Actualizar"
+          class="text-gray-400 hover:text-orange-500 transition p-1">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </button>
+        <button @click="logout()" title="Cerrar sesión"
+          class="text-gray-400 hover:text-red-400 transition p-1">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Content -->
+    <main class="flex-1 overflow-y-auto pb-24 max-w-2xl mx-auto w-full">
+
+      <!-- ── Dashboard ── -->
+      <div x-show="view === 'home'" class="px-4 pt-6 space-y-4">
+
+        <!-- Date + stats row -->
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-orange-500 rounded-3xl p-5 text-white">
+            <p class="text-orange-200 text-xs uppercase tracking-wide font-medium" x-text="dateStr()"></p>
+            <p class="text-2xl font-bold mt-1" x-text="todayEvents().length ? todayEvents().length + (todayEvents().length === 1 ? ' evento' : ' eventos') : 'Día libre'"></p>
+            <p class="text-orange-200 text-xs mt-1">hoy en agenda</p>
+          </div>
+          <div class="bg-white rounded-3xl p-5 shadow-sm">
+            <p class="text-gray-400 text-xs uppercase tracking-wide font-medium">Compras</p>
+            <p class="text-2xl font-bold text-gray-800 mt-1" x-text="shopping.length"></p>
+            <p class="text-gray-400 text-xs mt-1">pendientes</p>
+          </div>
+        </div>
+
+        <!-- Today -->
+        <div x-show="todayEvents().length > 0">
+          <h3 class="text-xs uppercase tracking-wide font-semibold text-gray-400 mb-2 px-1">Hoy</h3>
+          <template x-for="e in todayEvents()" :key="e.id">
+            <div class="bg-white rounded-2xl p-4 mb-2 shadow-sm flex items-start gap-3 border-l-4 border-orange-400">
+              <div class="text-orange-300 font-mono text-sm pt-0.5 min-w-[40px]" x-text="fmtTime(e.start)"></div>
+              <div class="flex-1 min-w-0">
+                <p class="font-semibold text-gray-800 truncate" x-text="e.title"></p>
+                <p x-show="e.location" class="text-gray-400 text-xs mt-0.5 truncate">📍 <span x-text="e.location"></span></p>
+              </div>
+              <span x-show="e.responsible_nickname"
+                class="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full flex-shrink-0 font-medium"
+                x-text="e.responsible_nickname"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Upcoming preview -->
+        <div x-show="upcomingEvents().length > 0">
+          <div class="flex justify-between items-center mb-2 px-1">
+            <h3 class="text-xs uppercase tracking-wide font-semibold text-gray-400">Próximos</h3>
+            <button @click="view='calendar'" class="text-orange-500 text-xs font-medium">Ver todos →</button>
+          </div>
+          <template x-for="e in upcomingEvents().slice(0,3)" :key="e.id">
+            <div class="bg-white rounded-2xl p-4 mb-2 shadow-sm flex items-start gap-3">
+              <div class="text-gray-400 text-xs pt-0.5 min-w-[70px] font-medium" x-text="fmtDateShort(e.start)"></div>
+              <div class="flex-1 min-w-0">
+                <p class="font-medium text-gray-700 truncate" x-text="e.title"></p>
+                <p x-show="e.location" class="text-gray-400 text-xs truncate">📍 <span x-text="e.location"></span></p>
+              </div>
+              <span x-show="e.responsible_nickname"
+                class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full flex-shrink-0"
+                x-text="e.responsible_nickname"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Shopping preview -->
+        <div x-show="shopping.length > 0">
+          <div class="flex justify-between items-center mb-2 px-1">
+            <h3 class="text-xs uppercase tracking-wide font-semibold text-gray-400">Lista de compras</h3>
+            <button @click="view='shopping'" class="text-orange-500 text-xs font-medium">Ver todo →</button>
+          </div>
+          <div class="bg-white rounded-2xl p-4 shadow-sm">
+            <template x-for="item in shopping.slice(0,5)" :key="item.id">
+              <div class="flex items-center py-2 border-b border-gray-50 last:border-0">
+                <span class="text-gray-700 text-sm" x-text="item.name"></span>
+                <span x-show="item.quantity" class="text-gray-400 text-xs ml-1.5"
+                  x-text="`(${item.quantity}${item.unit ? ' ' + item.unit : ''})`"></span>
+              </div>
+            </template>
+            <p x-show="shopping.length > 5" class="text-gray-400 text-xs mt-2">
+              y <span x-text="shopping.length - 5"></span> más…
+            </p>
+          </div>
+        </div>
+
+        <div x-show="!loading && todayEvents().length === 0 && upcomingEvents().length === 0 && shopping.length === 0"
+          class="text-center py-12 text-gray-400">
+          <div class="text-4xl mb-3">🎉</div>
+          <p>Todo tranquilo por acá</p>
+        </div>
+      </div>
+
+      <!-- ── Agenda ── -->
+      <div x-show="view === 'calendar'" class="px-4 pt-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">📅 Agenda</h2>
+        <div x-show="events.length === 0" class="text-center py-12 text-gray-400">
+          <div class="text-4xl mb-3">📭</div>
+          <p>Sin eventos próximos</p>
+        </div>
+        <template x-for="group in groupedEvents()" :key="group.key">
+          <div class="mb-5">
+            <h3 class="text-xs uppercase tracking-wide font-semibold mb-2 px-1"
+              :class="group.isToday ? 'text-orange-500' : 'text-gray-400'"
+              x-text="group.label"></h3>
+            <template x-for="e in group.events" :key="e.id">
+              <div class="bg-white rounded-2xl p-4 mb-2 shadow-sm flex items-start gap-3"
+                :class="group.isToday ? 'border-l-4 border-orange-400' : ''">
+                <div class="font-mono text-sm pt-0.5 min-w-[40px]"
+                  :class="group.isToday ? 'text-orange-400' : 'text-gray-400'"
+                  x-text="fmtTime(e.start)"></div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <p class="font-semibold text-gray-800 truncate" x-text="e.title"></p>
+                    <span x-show="e.is_recurring" class="text-xs text-gray-300" title="Evento recurrente">🔁</span>
+                  </div>
+                  <p x-show="e.location" class="text-gray-400 text-xs mt-0.5 truncate">📍 <span x-text="e.location"></span></p>
+                </div>
+                <span x-show="e.responsible_nickname"
+                  class="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full flex-shrink-0 font-medium"
+                  x-text="e.responsible_nickname"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+
+      <!-- ── Compras ── -->
+      <div x-show="view === 'shopping'" class="px-4 pt-6">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-bold text-gray-800">🛒 Compras</h2>
+          <span class="text-gray-400 text-sm" x-text="`${shopping.length} pendiente${shopping.length !== 1 ? 's' : ''}`"></span>
+        </div>
+        <div x-show="shopping.length === 0" class="bg-white rounded-3xl p-10 text-center text-gray-400 shadow-sm">
+          <div class="text-4xl mb-3">🎉</div>
+          <p class="font-medium">Lista vacía — todo comprado!</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <template x-for="item in shopping" :key="item.id">
+            <div class="flex items-center px-4 py-4 border-b border-gray-50 last:border-0 gap-3">
+              <button @click="markDone(item.id)"
+                class="w-6 h-6 rounded-full border-2 border-gray-200 hover:border-green-400 hover:bg-green-50 flex-shrink-0 transition flex items-center justify-center">
+                <svg x-show="markingDone === item.id" class="w-3 h-3 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+              </button>
+              <div class="flex-1">
+                <span class="text-gray-800 font-medium" x-text="item.name"></span>
+                <span x-show="item.quantity" class="text-gray-400 text-sm ml-1.5"
+                  x-text="`${item.quantity}${item.unit ? ' ' + item.unit : ''}`"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+        <p class="text-center text-gray-400 text-xs mt-4">Tocá el círculo para tachar un ítem</p>
+      </div>
+
+      <!-- ── Familia ── -->
+      <div x-show="view === 'family'" class="px-4 pt-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">👥 Familia</h2>
+        <div x-show="family.length === 0" class="text-center py-12 text-gray-400">
+          <div class="text-4xl mb-3">👤</div>
+          <p>No hay miembros registrados.<br><span class="text-xs">Agregá desde Supabase → family_members</span></p>
+        </div>
+        <template x-for="m in family" :key="m.id">
+          <div class="bg-white rounded-2xl p-4 mb-3 shadow-sm flex items-center gap-4">
+            <div class="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center text-2xl flex-shrink-0"
+              x-text="memberEmoji(m.nickname)"></div>
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-gray-800" x-text="m.name"></p>
+              <p class="text-orange-500 text-sm" x-text="`@${m.nickname}`"></p>
+              <p class="text-gray-400 text-xs truncate" x-text="m.whatsapp_number"></p>
+            </div>
+          </div>
+        </template>
+      </div>
+
+    </main>
+
+    <!-- Bottom Nav -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 shadow-lg safe-bottom z-10">
+      <div class="flex justify-around items-center max-w-2xl mx-auto">
+        <template x-for="tab in tabs" :key="tab.id">
+          <button @click="view = tab.id"
+            :class="view === tab.id ? 'text-orange-500' : 'text-gray-400'"
+            class="flex flex-col items-center py-3 px-4 flex-1 transition-colors">
+            <span class="text-xl" x-text="tab.icon"></span>
+            <span class="text-xs mt-1 font-medium" x-text="tab.label"></span>
+          </button>
+        </template>
+      </div>
+    </nav>
+  </div>
+
+  <script>
+    const SUPABASE_URL = '{{ supabase_url }}'
+    const SUPABASE_ANON_KEY = '{{ supabase_anon_key }}'
+    const { createClient } = supabase
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    const AR_TZ = 'America/Argentina/Buenos_Aires'
+
+    function famapp() {
+      return {
+        loading: true,
+        user: null,
+        token: null,
+        view: 'home',
+        tabs: [
+          { id: 'home',     icon: '🏠', label: 'Inicio' },
+          { id: 'calendar', icon: '📅', label: 'Agenda' },
+          { id: 'shopping', icon: '🛒', label: 'Compras' },
+          { id: 'family',   icon: '👥', label: 'Familia' },
+        ],
+        email: '', password: '', authError: '', loggingIn: false,
+        events: [], shopping: [], family: [],
+        markingDone: null,
+
+        async init() {
+          const { data: { session } } = await sb.auth.getSession()
+          if (session) { this.user = session.user; this.token = session.access_token; await this.loadData() }
+          this.loading = false
+          sb.auth.onAuthStateChange((_e, s) => { this.user = s?.user || null; this.token = s?.access_token || null })
+        },
+
+        async login() {
+          this.loggingIn = true; this.authError = ''
+          const { data, error } = await sb.auth.signInWithPassword({ email: this.email, password: this.password })
+          if (error) { this.authError = 'Email o contraseña incorrectos' }
+          else { this.user = data.user; this.token = data.session.access_token; await this.loadData() }
+          this.loggingIn = false
+        },
+
+        async logout() {
+          await sb.auth.signOut()
+          this.user = null; this.token = null; this.events = []; this.shopping = []; this.family = []
+        },
+
+        async loadData() {
+          await Promise.all([this.loadEvents(), this.loadShopping(), this.loadFamily()])
+        },
+
+        async api(path, opts = {}) {
+          const r = await fetch(`/app/api${path}`, {
+            ...opts,
+            headers: { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json', ...(opts.headers||{}) }
+          })
+          if (r.status === 401) { await this.logout(); return null }
+          return r.ok ? r.json() : null
+        },
+
+        async loadEvents()   { const d = await this.api('/events');   if (d) this.events = d },
+        async loadShopping() { const d = await this.api('/shopping'); if (d) this.shopping = d },
+        async loadFamily()   { const d = await this.api('/family');   if (d) this.family = d },
+
+        async markDone(id) {
+          this.markingDone = id
+          await this.api(`/shopping/${id}/done`, { method: 'PUT' })
+          this.shopping = this.shopping.filter(i => i.id !== id)
+          this.markingDone = null
+        },
+
+        // Computed
+        todayEvents() {
+          const t = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
+          return this.events.filter(e => new Date(e.start).toLocaleDateString('en-CA', { timeZone: AR_TZ }) === t)
+        },
+        upcomingEvents() {
+          const t = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
+          return this.events.filter(e => new Date(e.start).toLocaleDateString('en-CA', { timeZone: AR_TZ }) !== t)
+        },
+        groupedEvents() {
+          const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
+          const groups = {}
+          for (const e of this.events) {
+            const k = new Date(e.start).toLocaleDateString('en-CA', { timeZone: AR_TZ })
+            if (!groups[k]) groups[k] = { key: k, label: this.fmtDayLabel(e.start), isToday: k === todayStr, events: [] }
+            groups[k].events.push(e)
+          }
+          return Object.values(groups).sort((a,b) => a.key.localeCompare(b.key))
+        },
+
+        // Formatting
+        fmtTime(iso) {
+          return new Date(iso).toLocaleTimeString('es-AR', { timeZone: AR_TZ, hour: '2-digit', minute: '2-digit', hour12: false })
+        },
+        fmtDateShort(iso) {
+          const d = new Date(iso)
+          const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
+          const dStr = d.toLocaleDateString('en-CA', { timeZone: AR_TZ })
+          if (dStr === todayStr) return 'Hoy ' + this.fmtTime(iso)
+          return d.toLocaleDateString('es-AR', { timeZone: AR_TZ, weekday: 'short', day: 'numeric', month: 'short' })
+        },
+        fmtDayLabel(iso) {
+          const d = new Date(iso)
+          const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
+          const tomorrowStr = (() => { const t = new Date(); t.setDate(t.getDate()+1); return t.toLocaleDateString('en-CA', { timeZone: AR_TZ }) })()
+          const dStr = d.toLocaleDateString('en-CA', { timeZone: AR_TZ })
+          if (dStr === todayStr) return 'Hoy'
+          if (dStr === tomorrowStr) return 'Mañana'
+          return d.toLocaleDateString('es-AR', { timeZone: AR_TZ, weekday: 'long', day: 'numeric', month: 'long' })
+        },
+        greeting() {
+          const h = parseInt(new Date().toLocaleString('es-AR', { timeZone: AR_TZ, hour: 'numeric', hour12: false }))
+          return h < 12 ? 'Buenos días ☀️' : h < 20 ? 'Buenas tardes 🌤' : 'Buenas noches 🌙'
+        },
+        dateStr() {
+          return new Date().toLocaleDateString('es-AR', { timeZone: AR_TZ, weekday: 'long', day: 'numeric', month: 'long' })
+        },
+        memberEmoji(nick) {
+          const m = { papa: '👨', mama: '👩', abuelo: '👴', abuela: '👵' }
+          return m[nick?.toLowerCase()] || '🧑'
+        },
+      }
+    }
+  </script>
+</body>
+</html>

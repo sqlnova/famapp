@@ -14,6 +14,7 @@ from core.config import get_settings
 from core.models import IncomingWhatsAppMessage, MessageRecord, MessageStatus
 from core.supabase_client import upsert_message
 from agents.intake.graph import run_intake
+from server.web import router as web_router
 
 logger = structlog.get_logger(__name__)
 
@@ -41,10 +42,11 @@ async def lifespan(app: FastAPI):
         stop_scheduler()
 
 
-app = FastAPI(title="FamApp", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="FamApp", version="0.3.0", lifespan=lifespan)
 # Trust Railway's reverse proxy headers so request.url uses https://
 # This is required for Twilio signature validation to work behind a proxy
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+app.include_router(web_router)
 
 
 # ── Twilio signature validation ───────────────────────────────────────────────

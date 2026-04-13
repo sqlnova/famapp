@@ -63,6 +63,9 @@ def _parse_event(raw: dict) -> CalendarEvent:
 
     raw_desc = raw.get("description")
     clean_desc, responsible = _extract_responsible(raw_desc)
+    # Recurring event instances have recurringEventId — disable auto-alerts to
+    # avoid daily spam for habitual events (school runs, weekly classes, etc.).
+    is_recurring_instance = "recurringEventId" in raw
 
     return CalendarEvent(
         id=raw.get("id"),
@@ -75,6 +78,7 @@ def _parse_event(raw: dict) -> CalendarEvent:
             a["email"] for a in raw.get("attendees", []) if not a.get("self")
         ],
         responsible_nickname=responsible,
+        alerts_enabled=not is_recurring_instance,
     )
 
 
