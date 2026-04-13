@@ -14,7 +14,6 @@ from agents.intake.state import IntakeState
 
 logger = structlog.get_logger(__name__)
 
-# ── Shared LLM instance ───────────────────────────────────────────────────────
 
 def _get_llm() -> ChatOpenAI:
     s = get_settings()
@@ -25,57 +24,54 @@ def _get_llm() -> ChatOpenAI:
     )
 
 
-# ── System prompt ─────────────────────────────────────────────────────────────
-
 SYSTEM_PROMPT = """Sos el agente de recepción (Intake) de FamApp, un sistema familiar de logística.
 Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
 
-1. Clasificar la INTENCIÓN principal del mensaje en una de estas categorías:
-   - "schedule"  : quieren agendar, modificar o consultar un evento en el calendario
-   - "logistics" : quieren saber a qué hora salir, cuánto tarda un viaje, alertas de tráfico
-   - "shopping"  : quieren agregar o consultar la lista de compras
-   - "query"     : consulta general (¿qué tengo mañana?, ¿quién lleva a los chicos?)
-   - "unknown"   : no podés determinar la intención
+1. Clasificar la INTENCIÓN principal en:
+   - "schedule"  : TODO lo relacionado con el calendario — agendar, modificar, cancelar o CONSULTAR eventos.
+                   Usá "schedule" cuando pregunten qué tienen pendiente, qué hay esta semana, cuándo es algo, etc.
+                   Ejemplos: "¿qué tengo mañana?", "¿qué hay esta semana?", "agendame el dentista", "¿cuándo es el cumple de mamá?"
+   - "logistics" : tiempo de viaje, a qué hora salir, tráfico, cómo llegar.
+                   Ejemplos: "¿cuánto tardo en llegar a Palermo?", "¿a qué hora salgo para llegar a tiempo?"
+   - "shopping"  : lista de compras — agregar, consultar o tachar items.
+                   Ejemplos: "agregá leche", "¿qué falta comprar?", "comprar pan y huevos"
+   - "unknown"   : no podés determinar la intención con certeza
 
-2. Extraer ENTIDADES relevantes según la intención:
+   IMPORTANTE: Nunca uses "unknown" si el mensaje claramente habla de calendario, viajes o compras.
+   La categoría "query" NO EXISTE — toda consulta cae en schedule, logistics o shopping según el tema.
+
+2. Extraer ENTIDADES según la intención:
    - schedule  → { "title": str, "date": str, "time": str, "location": str, "people": [str] }
    - logistics → { "destination": str, "event_time": str, "origin": str }
    - shopping  → { "items": [{"name": str, "quantity": str, "unit": str}] }
-   - query     → { "topic": str }
 
-3. Responder SIEMPRE en español rioplatense informal y breve.
+3. Responder en español rioplatense informal y breve.
 
-Devolvé SIEMPRE un JSON con este esquema exacto (sin markdown):
+Devolvé SIEMPRE JSON sin markdown:
 {
   "intent": "<intención>",
   "confidence": <0.0-1.0>,
   "entities": { ... },
-  "summary": "<resumen breve en español>",
-  "response": "<respuesta directa al usuario si podés resolverlo aquí, o null si hay que derivar>"
+  "summary": "<resumen breve>",
+  "response": "<respuesta directa solo si podés resolver sin sub-agentes, o null>"
 }
 """
 
 
-# ── Nodes ─────────────────────────────────────────────────────────────────────
-
 async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
-    """Call LLM to parse intent and extract entities from the incoming message."""
+    """LLM call to parse intent and extract entities."""
     llm = _get_llm()
-
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=state["raw_text"]),
     ]
-
     logger.info("intake_parsing", sender=state["sender"], text=state["raw_text"][:100])
-
     response = await llm.ainvoke(messages)
     content = response.content
 
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError:
-        # Try to extract JSON block if LLM wrapped it
         import re
         match = re.search(r"\{.*\}", content, re.DOTALL)
         parsed = json.loads(match.group()) if match else {}
@@ -86,12 +82,7 @@ async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
     except ValueError:
         intent = IntentType.UNKNOWN
 
-    logger.info(
-        "intake_classified",
-        intent=intent,
-        confidence=parsed.get("confidence", 0.0),
-        summary=parsed.get("summary", ""),
-    )
+    logger.info("intake_classified", intent=intent, confidence=parsed.get("confidence", 0.0))
 
     return {
         "messages": state["messages"] + [HumanMessage(content=state["raw_text"]), response],
@@ -99,12 +90,12 @@ async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
         "confidence": float(parsed.get("confidence", 0.0)),
         "entities": parsed.get("entities", {}),
         "summary": parsed.get("summary", ""),
-        "response_text": parsed.get("response"),  # May be None – means we need to route
+        "response_text": parsed.get("response"),
     }
 
 
 async def handle_shopping(state: IntakeState) -> Dict[str, Any]:
-    """Process shopping requests directly within Intake."""
+    """Process shopping requests within Intake."""
     from agents.intake.tools import add_item_to_shopping_list, list_shopping_items
 
     entities = state.get("entities", {})
@@ -122,43 +113,60 @@ async def handle_shopping(state: IntakeState) -> Dict[str, Any]:
             responses.append(result)
         response_text = " ".join(responses)
     else:
-        # Query for current list
         response_text = await list_shopping_items.ainvoke({})
 
     return {"response_text": response_text, "route_to": "direct"}
 
 
+async def handle_schedule(state: IntakeState) -> Dict[str, Any]:
+    """Delegate to the Schedule Agent (Google Calendar)."""
+    from agents.schedule.nodes import handle_schedule as schedule_handler
+    response_text = await schedule_handler(
+        sender=state["sender"],
+        raw_text=state["raw_text"],
+        entities=state.get("entities", {}),
+    )
+    return {"response_text": response_text, "route_to": "schedule"}
+
+
+async def handle_logistics(state: IntakeState) -> Dict[str, Any]:
+    """Delegate to the Logistics Agent (Google Maps)."""
+    from agents.logistics import handle_logistics_query
+    response_text = await handle_logistics_query(
+        sender=state["sender"],
+        entities=state.get("entities", {}),
+        message_sid=state["message_sid"],
+    )
+    return {"response_text": response_text, "route_to": "logistics"}
+
+
 async def build_response(state: IntakeState) -> Dict[str, Any]:
-    """Final node: ensure we have a response_text ready to send."""
+    """Ensure we always have a response_text."""
     if state.get("response_text"):
         return {}
 
-    # Fallback: acknowledge and inform that it's being processed
     intent = state.get("intent", IntentType.UNKNOWN)
     fallbacks = {
-        IntentType.SCHEDULE:  "Entendido, voy a gestionar eso en el calendario ahora.",
-        IntentType.LOGISTICS: "Ok, calculo el tiempo de viaje y te aviso.",
-        IntentType.SHOPPING:  "Listo, actualicé la lista de compras.",
-        IntentType.QUERY:     "Déjame consultar y te respondo en un momento.",
-        IntentType.UNKNOWN:   "No entendí bien. ¿Podés reformular?",
+        IntentType.SCHEDULE:  "Voy a revisar el calendario ahora.",
+        IntentType.LOGISTICS: "Calculo el tiempo de viaje y te aviso.",
+        IntentType.SHOPPING:  "Listo, actualicé la lista.",
+        IntentType.UNKNOWN:   "No entendí bien. ¿Podés reformular con más detalle?",
     }
     return {"response_text": fallbacks.get(intent, "Procesando tu solicitud…")}
 
 
 async def determine_route(state: IntakeState) -> str:
-    """Conditional edge: decide which node to go to next."""
+    """Conditional edge: which node runs after classification."""
     intent = state.get("intent", IntentType.UNKNOWN)
-    response = state.get("response_text")
 
-    # If LLM already produced a direct response, skip sub-agents
-    if response:
+    # LLM already provided a direct answer
+    if state.get("response_text"):
         return "build_response"
 
     route_map = {
         IntentType.SHOPPING:  "handle_shopping",
-        IntentType.SCHEDULE:  "build_response",   # stub → will call Schedule Agent later
-        IntentType.LOGISTICS: "build_response",   # stub → will call Logistics Agent later
-        IntentType.QUERY:     "build_response",
+        IntentType.SCHEDULE:  "handle_schedule",
+        IntentType.LOGISTICS: "handle_logistics",
         IntentType.UNKNOWN:   "build_response",
     }
     return route_map.get(intent, "build_response")

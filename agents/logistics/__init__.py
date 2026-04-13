@@ -1,20 +1,12 @@
-"""Logistics Agent – proactive travel-time alerts.
-
-Status: STUB – to be implemented in next iteration.
-
-Responsibilities:
-- Poll Google Calendar for upcoming events with a location
-- Calculate real travel time using Google Maps Directions API (with traffic)
-- Schedule a proactive WhatsApp push "Salí en X minutos" to relevant family members
-- Store and manage pending alerts in logistics_alerts table
-- Cancel/update alerts if calendar changes
-"""
+"""Logistics Agent – proactive travel-time alerts + on-demand queries."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import structlog
+
+from agents.logistics.maps_client import get_travel_time
+from agents.logistics.proactive import start_scheduler, stop_scheduler
 
 logger = structlog.get_logger(__name__)
 
@@ -24,34 +16,30 @@ async def handle_logistics_query(
     entities: Dict[str, Any],
     message_sid: str,
 ) -> Optional[str]:
-    """Entry point for on-demand logistics queries from Intake Agent.
+    """On-demand logistics query from Intake Agent.
 
-    Args:
-        sender: WhatsApp number of the requester.
-        entities: { destination, event_time, origin }
-        message_sid: Original message SID.
-
-    Returns:
-        Response text with estimated travel info.
+    Entities expected: { destination, event_time (optional), origin (optional) }
     """
-    logger.info("logistics_agent_called", sender=sender, entities=entities)
-    destination = entities.get("destination", "tu destino")
-    # TODO: call Google Maps Directions API with departure_time=now+buffer
-    return (
-        f"Calculando tiempo de viaje a '{destination}'… "
-        "(Integración con Google Maps próximamente)"
-    )
+    destination = entities.get("destination")
+    if not destination:
+        return "¿A dónde necesitás ir? Decime la dirección o el nombre del lugar."
+
+    try:
+        travel = get_travel_time(destination=destination)
+        duration = travel.human_readable()
+        dist = travel.distance_km
+
+        return (
+            f"🚗 Para ir a *{destination}*:\n"
+            f"⏱ Tiempo estimado: *{duration}* (con tráfico)\n"
+            f"📏 Distancia: {dist} km\n"
+            f"🛣 Ruta: {travel.summary}"
+        )
+    except ValueError as e:
+        return f"No encontré ruta a '{destination}'. ¿Podés ser más específica con la dirección?"
+    except Exception:
+        logger.exception("logistics_query_error", destination=destination)
+        return "No pude calcular el tiempo de viaje ahora. Intentá de nuevo."
 
 
-async def schedule_proactive_alerts() -> None:
-    """Cron job: check calendar events in next 3h and schedule departure alerts.
-
-    Called periodically by the scheduler (e.g. APScheduler or Supabase cron).
-    """
-    logger.info("logistics_proactive_check_started")
-    # TODO:
-    # 1. Fetch calendar events in next 3 hours that have a location
-    # 2. For each event, call Maps API to get travel time from home
-    # 3. Calculate send_at = event.start - travel_time - 10min buffer
-    # 4. If send_at > now and no alert exists, insert into logistics_alerts
-    # 5. A separate process polls logistics_alerts and fires WhatsApp messages
+__all__ = ["handle_logistics_query", "start_scheduler", "stop_scheduler"]
