@@ -78,8 +78,8 @@ class Settings(BaseSettings):
     )
     # How far ahead to look for calendar events (hours)
     logistics_lookahead_hours: int = Field(3)
-    # Buffer added on top of travel time before sending alert (minutes)
-    logistics_buffer_minutes: int = Field(15)
+    # Prep time before departure: alert fires this many minutes before leave_at (minutes)
+    logistics_buffer_minutes: int = Field(20)
     # How often the proactive scheduler polls calendar (minutes)
     scheduler_interval_minutes: int = Field(15)
 

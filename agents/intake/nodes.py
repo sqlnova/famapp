@@ -30,13 +30,23 @@ Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
 1. Clasificar la INTENCIÓN principal en:
    - "schedule"  : TODO lo relacionado con el calendario — agendar, modificar, cancelar o CONSULTAR eventos.
                    Usá "schedule" cuando pregunten qué tienen pendiente, qué hay esta semana, cuándo es algo, etc.
-                   Ejemplos: "¿qué tengo mañana?", "¿qué hay esta semana?", "agendame el dentista", "¿cuándo es el cumple de mamá?"
-   - "logistics" : tiempo de viaje, a qué hora salir, tráfico, cómo llegar.
-                   Ejemplos: "¿cuánto tardo en llegar a Palermo?", "¿a qué hora salgo para llegar a tiempo?"
+                   Usá "schedule" también cuando alguien ENUNCIA un plan futuro: una persona va a algún lugar
+                   a una hora determinada, aunque no digan explícitamente "agenda" o "anotá".
+                   Ejemplos: "¿qué tengo mañana?", "agendame el dentista", "mañana papá lleva a los chicos al club a las 16",
+                             "Giuseppe y papá tienen que estar en el aeropuerto a las 20:20, lleva mamá",
+                             "hoy papá lleva a Gaetano al colegio a las 8:30"
+   - "logistics" : SOLO cuando se hace una PREGUNTA explícita sobre tiempo de viaje, tráfico o cómo llegar.
+                   Ejemplos: "¿cuánto tardo en llegar a Palermo?", "¿a qué hora salgo para llegar a tiempo?",
+                             "¿cuánto hay de acá al aeropuerto?"
+                   NO uses "logistics" cuando el usuario simplemente enuncia un plan o evento futuro.
    - "shopping"  : lista de compras — agregar, consultar o tachar items.
                    Ejemplos: "agregá leche", "¿qué falta comprar?", "comprar pan y huevos",
                              "tachá la leche", "ya compré el pan", "marca el aceite como comprado"
    - "unknown"   : no podés determinar la intención con certeza
+
+   REGLA CLAVE: Si el mensaje menciona a una persona que va a algún lugar a una hora específica
+   (ej: "papá lleva a X al club a las 16", "tienen que estar en Y a las 20"), clasificalo como
+   "schedule" — el agente de calendario se encargará de crearlo aunque no digan "agenda".
 
    IMPORTANTE: Nunca uses "unknown" si el mensaje claramente habla de calendario, viajes o compras.
    La categoría "query" NO EXISTE — toda consulta cae en schedule, logistics o shopping según el tema.

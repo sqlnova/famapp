@@ -48,6 +48,25 @@ Ejemplos:
   "Joaquina tiene fútbol los sábados de 10 a 12, la lleva papá y la busco yo"
   → Evento 1: "Llevar Joaquina al fútbol"  10:00–10:15  responsible: papa
   → Evento 2: "Buscar Joaquina del fútbol" 12:00–12:15  responsible: mama
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXCEPCIÓN — VIAJES / PARTIDAS (solo UN evento)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Cuando el contexto indica que las personas VAN A VIAJAR y deben estar en un
+punto de partida (aeropuerto, terminal de bus, puerto, estación de tren) a cierta
+hora, creá SOLO UN evento "Llevar [personas] al [lugar]". NO creés evento de
+"Retirar" porque esas personas VIAJAN y no regresan al mismo lugar.
+
+Señales claras de partida (→ un solo evento Llevar):
+  - Lugar: aeropuerto, terminal, puerto, estación
+  - Frases: "tienen que estar en X", "deben llegar a X", "toman el vuelo/colectivo/tren"
+  - La persona que "lleva" ≠ la(s) que viajan (ej: "lleva mamá" significa mamá conduce,
+    Giuseppe y papá son los pasajeros que viajan)
+
+Ejemplo correcto:
+  "Giuseppe y papá tienen que estar en el aeropuerto a las 20:20, lleva mamá"
+  → SOLO Evento 1: "Llevar Giuseppe y papá al aeropuerto"  20:20–20:35  responsible: mama
+  (NO crear evento de retirar — Giuseppe y papá viajan en avión)
 ═══════════════════════════════════════════════════
 
 Campo "responsible":

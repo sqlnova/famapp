@@ -52,6 +52,7 @@ def _save_alert(
     event: CalendarEvent,
     scheduled_send: datetime,
     travel_minutes: int,
+    leave_at: datetime,
     responsible_whatsapp: Optional[str] = None,
 ) -> None:
     s = get_settings()
@@ -62,6 +63,8 @@ def _save_alert(
         "event_start_utc": event.start.astimezone(timezone.utc).isoformat(),
         "destination": event.location,
         "scheduled_send": scheduled_send.isoformat(),
+        "travel_minutes": travel_minutes,
+        "leave_at_utc": leave_at.astimezone(timezone.utc).isoformat(),
         "sent": False,
         "send_to": s.phone_list,
         "responsible_whatsapp": responsible_whatsapp,
@@ -70,6 +73,7 @@ def _save_alert(
         "logistics_alert_saved",
         event=event.title,
         send_at=scheduled_send.isoformat(),
+        leave_at=leave_at.isoformat(),
         travel_min=travel_minutes,
     )
 
@@ -111,21 +115,23 @@ async def _process_event(event: CalendarEvent) -> None:
         logger.exception("logistics_maps_error", event=event.title, location=event.location)
         return
 
-    buffer = timedelta(minutes=s.logistics_buffer_minutes)
     travel_td = timedelta(minutes=travel.duration_minutes)
-    leave_at = event.start - travel_td - buffer
-    send_at = leave_at - timedelta(minutes=5)  # send alert 5 min before "leave" time
+    # leave_at = the exact moment they must walk out the door to arrive on time
+    leave_at = event.start - travel_td
+    # send_at = leave_at minus prep time (getting ready, reading the message, etc.)
+    prep_buffer = timedelta(minutes=s.logistics_buffer_minutes)
+    send_at = leave_at - prep_buffer
 
     if send_at <= now:
-        # Too late to schedule – send immediately if leave_at is still in the future
+        # Too late to schedule – send immediately if departure is still ahead
         if leave_at > now:
             minutes_left = int((leave_at - now).total_seconds() / 60)
             _fire_alert(event, travel.duration_minutes, minutes_left, responsible_wa)
-            _save_alert(event, now, travel.duration_minutes, responsible_wa)
+            _save_alert(event, now, travel.duration_minutes, leave_at, responsible_wa)
         return
 
     # Schedule future alert
-    _save_alert(event, send_at, travel.duration_minutes, responsible_wa)
+    _save_alert(event, send_at, travel.duration_minutes, leave_at, responsible_wa)
     logger.info("logistics_alert_scheduled", event=event.title, send_at=send_at.isoformat())
 
 
@@ -184,23 +190,39 @@ async def check_and_send_due_alerts() -> None:
         try:
             event_title = row.get("event_title") or "Evento"
             destination = row.get("destination", "")
+
             event_time_str = ""
             event_start_raw = row.get("event_start_utc")
             if event_start_raw:
                 start_dt = datetime.fromisoformat(event_start_raw).astimezone(AR_TZ)
                 event_time_str = start_dt.strftime("%H:%M")
 
+            leave_at_str = ""
+            leave_at_raw = row.get("leave_at_utc")
+            if leave_at_raw:
+                leave_dt = datetime.fromisoformat(leave_at_raw).astimezone(AR_TZ)
+                leave_at_str = leave_dt.strftime("%H:%M")
+
+            travel_min = row.get("travel_minutes")
+            travel_str = (
+                f"{travel_min} min" if travel_min and travel_min < 60
+                else f"{travel_min // 60}h {travel_min % 60}min" if travel_min
+                else None
+            )
+
             # Prefer the responsible person; fall back to all family members
             responsible_wa = row.get("responsible_whatsapp")
             recipients = [responsible_wa] if responsible_wa else (row.get("send_to") or None)
 
-            msg = (
-                f"🚗 *¡Es hora de salir!*\n"
-                f"📅 {event_title}"
-                + (f" a las {event_time_str}" if event_time_str else "")
-                + f"\n📍 {destination}\n"
-                f"⏱ Recordá salir con tiempo suficiente."
-            )
+            lines = [f"🚗 *¡Hora de prepararse!*"]
+            lines.append(f"📅 {event_title}" + (f" a las {event_time_str}" if event_time_str else ""))
+            lines.append(f"📍 {destination}")
+            if leave_at_str:
+                lines.append(f"🕐 Salís a las *{leave_at_str}*")
+            if travel_str:
+                lines.append(f"⏱ Tráfico estimado: {travel_str}")
+            msg = "\n".join(lines)
+
             broadcast_whatsapp_message(msg, recipients=recipients)
             _mark_alert_sent(row["calendar_event_id"])
             logger.info(
