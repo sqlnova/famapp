@@ -8,6 +8,7 @@ import structlog
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 from twilio.request_validator import RequestValidator
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from core.config import get_settings
 from core.models import IncomingWhatsAppMessage, MessageRecord, MessageStatus
@@ -41,6 +42,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="FamApp", version="0.2.0", lifespan=lifespan)
+# Trust Railway's reverse proxy headers so request.url uses https://
+# This is required for Twilio signature validation to work behind a proxy
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 
 # ── Twilio signature validation ───────────────────────────────────────────────
