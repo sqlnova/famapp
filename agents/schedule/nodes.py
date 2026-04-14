@@ -226,6 +226,33 @@ def _normalize_time_str(raw: Any, default: str = "09:00") -> str:
     return f"{hour:02d}:{minute:02d}"
 
 
+def _extract_time_range(raw_text: str) -> Optional[tuple[str, str]]:
+    """Extract a same-day time range from free text (e.g. '14hs a 18hs')."""
+    text = (raw_text or "").lower().replace(".", ":")
+    patterns = (
+        r"\bde\s+(\d{1,2}(?::\d{1,2})?\s*(?:am|pm|hs?)?)\s+a\s+(\d{1,2}(?::\d{1,2})?\s*(?:am|pm|hs?)?)",
+        r"\b(\d{1,2}(?::\d{1,2})?\s*(?:am|pm|hs?)?)\s*(?:a|-|hasta)\s*(\d{1,2}(?::\d{1,2})?\s*(?:am|pm|hs?)?)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        start = _normalize_time_str(match.group(1), default="")
+        end = _normalize_time_str(match.group(2), default="")
+        if start and end:
+            return start, end
+    return None
+
+
+def _minutes_between(start_hhmm: str, end_hhmm: str) -> int:
+    start = datetime.strptime(start_hhmm, "%H:%M")
+    end = datetime.strptime(end_hhmm, "%H:%M")
+    delta = int((end - start).total_seconds() // 60)
+    if delta <= 0:
+        return 60
+    return delta
+
+
 def _has_explicit_start_date(raw_text: str) -> bool:
     """Heuristic: user explicitly mentioned a concrete start date."""
     txt = raw_text or ""
@@ -380,10 +407,14 @@ async def handle_schedule(
                 return "No pude entender qué evento crear. ¿Podés darme más detalles?"
 
             created_msgs = []
+            explicit_range = _extract_time_range(raw_text)
             for ev_data in ev_list:
                 date_str = ev_data.get("date", datetime.now().strftime("%Y-%m-%d"))
-                time_str = _normalize_time_str(ev_data.get("time"), default="09:00")
+                parsed_time = _normalize_time_str(ev_data.get("time"), default="")
+                time_str = parsed_time or (explicit_range[0] if explicit_range else "09:00")
                 duration = int(ev_data.get("duration_minutes", 60))
+                if explicit_range and ("duration_minutes" not in ev_data or duration == 60):
+                    duration = _minutes_between(explicit_range[0], explicit_range[1])
                 responsible = _canonicalize_responsible(ev_data.get("responsible"), responsible_aliases)
                 # Resolve location alias → full address (fallback if LLM didn't resolve it)
                 location = resolve_place_address(ev_data.get("location") or "", known_places) or None
