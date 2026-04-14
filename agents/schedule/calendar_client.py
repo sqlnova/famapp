@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import pytz
 import structlog
@@ -186,6 +186,65 @@ def create_event(
         return _parse_event(created)
     except HttpError as e:
         logger.error("calendar_create_error", error=str(e))
+        raise
+
+
+def update_event(event_id: str, updates: dict[str, Any]) -> CalendarEvent:
+    """Update an existing event and return the updated object."""
+    s = get_settings()
+    service = _get_service()
+
+    try:
+        current = service.events().get(calendarId=s.google_calendar_id, eventId=event_id).execute()
+        body = dict(current)
+
+        if "title" in updates and updates["title"] is not None:
+            body["summary"] = updates["title"]
+        if "start" in updates and updates["start"] is not None:
+            body["start"] = {
+                "dateTime": _to_utc_rfc3339(updates["start"]),
+                "timeZone": "America/Argentina/Buenos_Aires",
+            }
+        if "end" in updates and updates["end"] is not None:
+            body["end"] = {
+                "dateTime": _to_utc_rfc3339(updates["end"]),
+                "timeZone": "America/Argentina/Buenos_Aires",
+            }
+        if "location" in updates:
+            body["location"] = updates["location"] or None
+
+        # Merge [responsable:nick] tag preserving existing free text.
+        existing_desc, existing_responsible = _extract_responsible(current.get("description"))
+        responsible = updates.get("responsible_nickname", existing_responsible)
+        desc_parts = [existing_desc] if existing_desc else []
+        if responsible:
+            desc_parts.append(f"[responsable:{responsible}]")
+        if desc_parts:
+            body["description"] = "\n".join(desc_parts)
+        else:
+            body.pop("description", None)
+
+        updated = service.events().update(
+            calendarId=s.google_calendar_id,
+            eventId=event_id,
+            body=body,
+        ).execute()
+        logger.info("calendar_event_updated", id=event_id)
+        return _parse_event(updated)
+    except HttpError as e:
+        logger.error("calendar_update_error", id=event_id, error=str(e))
+        raise
+
+
+def delete_event(event_id: str) -> None:
+    """Delete an event by id."""
+    s = get_settings()
+    service = _get_service()
+    try:
+        service.events().delete(calendarId=s.google_calendar_id, eventId=event_id).execute()
+        logger.info("calendar_event_deleted", id=event_id)
+    except HttpError as e:
+        logger.error("calendar_delete_error", id=event_id, error=str(e))
         raise
 
 
