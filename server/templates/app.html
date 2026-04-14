@@ -5,16 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>FamApp</title>
+  <title>FamApp · Privada</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
       theme: {
         extend: {
           colors: {
-            brand: { DEFAULT: '#F97316', 50: '#FFF7ED', 100: '#FFEDD5', 500: '#F97316', 600: '#EA580C' }
+            iosBlue: '#007AFF',
+            appBg: '#F4F5F7',
           },
-          fontFamily: { sans: ['-apple-system','BlinkMacSystemFont','Segoe UI','Roboto','sans-serif'] }
+          fontFamily: {
+            sans: ['-apple-system','BlinkMacSystemFont','SF Pro Text','Inter','Segoe UI','sans-serif']
+          }
         }
       }
     }
@@ -26,37 +29,25 @@
     .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 16px); }
   </style>
 </head>
-<body class="bg-orange-50 min-h-screen" x-data="famapp()" x-init="init()" x-cloak>
-
-  <!-- ── Loading ─────────────────────────────────────────── -->
-  <div x-show="loading" class="fixed inset-0 flex items-center justify-center bg-orange-50 z-50">
-    <div class="text-center">
-      <div class="text-6xl mb-4 animate-bounce">🏡</div>
-      <p class="text-orange-400 font-medium">Cargando FamApp…</p>
-    </div>
+<body class="bg-appBg min-h-screen text-slate-800" x-data="famapp()" x-init="init()" x-cloak>
+  <div x-show="loading" class="fixed inset-0 z-50 bg-appBg flex items-center justify-center">
+    <p class="text-sm text-slate-500">Cargando FamApp…</p>
   </div>
 
-  <!-- ── Login ───────────────────────────────────────────── -->
-  <div x-show="!loading && !user" class="flex items-center justify-center min-h-screen p-6">
+  <div x-show="!loading && !user" class="min-h-screen flex items-center justify-center p-6">
     <div class="w-full max-w-sm">
-      <div class="text-center mb-10">
-        <div class="text-7xl mb-3">🏡</div>
-        <h1 class="text-3xl font-bold text-gray-800">FamApp</h1>
-        <p class="text-gray-400 mt-1">Tu familia conectada</p>
+      <div class="text-center mb-8">
+        <h1 class="text-3xl font-semibold tracking-tight">FamApp</h1>
+        <p class="text-slate-500 mt-1">Acceso privado familiar</p>
       </div>
-      <div class="bg-white rounded-3xl shadow-sm p-8">
-        <form @submit.prevent="login()">
-          <div class="mb-4">
-            <input type="email" x-model="email" placeholder="Email"
-              class="w-full px-4 py-3.5 rounded-2xl border border-gray-100 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-orange-300 text-gray-800 transition">
-          </div>
-          <div class="mb-6">
-            <input type="password" x-model="password" placeholder="Contraseña"
-              class="w-full px-4 py-3.5 rounded-2xl border border-gray-100 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-orange-300 text-gray-800 transition">
-          </div>
-          <p x-show="authError" x-text="authError" class="text-red-400 text-sm mb-4 text-center"></p>
-          <button type="submit" :disabled="loggingIn"
-            class="w-full bg-orange-500 hover:bg-orange-600 text-white py-3.5 rounded-2xl font-semibold transition disabled:opacity-60 shadow-sm">
+      <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+        <form @submit.prevent="login" class="space-y-3">
+          <input type="email" x-model="email" placeholder="Email"
+            class="w-full rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-iosBlue/30">
+          <input type="password" x-model="password" placeholder="Contraseña"
+            class="w-full rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-iosBlue/30">
+          <p x-show="authError" x-text="authError" class="text-sm text-red-500"></p>
+          <button type="submit" class="w-full rounded-2xl bg-iosBlue text-white py-3 font-medium" :disabled="loggingIn">
             <span x-show="!loggingIn">Ingresar</span>
             <span x-show="loggingIn">Ingresando…</span>
           </button>
@@ -65,268 +56,204 @@
     </div>
   </div>
 
-  <!-- ── App ─────────────────────────────────────────────── -->
-  <div x-show="!loading && user" class="flex flex-col min-h-screen">
-
-    <!-- Top bar -->
-    <header class="bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between sticky top-0 z-10">
-      <div>
-        <h1 class="font-bold text-gray-800 text-lg leading-none">🏡 FamApp</h1>
-        <p class="text-gray-400 text-xs mt-0.5" x-text="greeting()"></p>
-      </div>
-      <div class="flex items-center gap-3">
-        <button @click="loadData()" title="Actualizar"
-          class="text-gray-400 hover:text-orange-500 transition p-1">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-          </svg>
-        </button>
-        <button @click="logout()" title="Cerrar sesión"
-          class="text-gray-400 hover:text-red-400 transition p-1">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
-          </svg>
-        </button>
+  <div x-show="!loading && user" class="max-w-3xl mx-auto pb-28">
+    <header class="sticky top-0 z-20 bg-appBg/90 backdrop-blur px-4 pt-5 pb-3">
+      <div class="bg-white rounded-3xl px-5 py-4 border border-slate-100 shadow-sm flex items-center justify-between">
+        <div>
+          <p class="text-xs text-slate-500">FamApp privada</p>
+          <h2 class="font-semibold text-lg" x-text="headerTitle()"></h2>
+        </div>
+        <button @click="logout" class="text-xs text-slate-500">Salir</button>
       </div>
     </header>
 
-    <!-- Content -->
-    <main class="flex-1 overflow-y-auto pb-24 max-w-2xl mx-auto w-full">
+    <main class="px-4 space-y-4">
+      <section x-show="view==='home'" class="space-y-4">
+        <div class="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm">
+          <p class="text-xs uppercase tracking-wide text-slate-400">Resumen de hoy</p>
+          <p class="text-2xl font-semibold mt-1" x-text="nextDepartureLabel()"></p>
+          <p class="text-sm text-slate-500">Próxima salida sugerida</p>
+        </div>
 
-      <!-- ── Dashboard ── -->
-      <div x-show="view === 'home'" class="px-4 pt-6 space-y-4">
-
-        <!-- Date + stats row -->
         <div class="grid grid-cols-2 gap-3">
-          <div class="bg-orange-500 rounded-3xl p-5 text-white">
-            <p class="text-orange-200 text-xs uppercase tracking-wide font-medium" x-text="dateStr()"></p>
-            <p class="text-2xl font-bold mt-1" x-text="todayEvents().length ? todayEvents().length + (todayEvents().length === 1 ? ' evento' : ' eventos') : 'Día libre'"></p>
-            <p class="text-orange-200 text-xs mt-1">hoy en agenda</p>
+          <div class="bg-white rounded-3xl p-4 border border-slate-100">
+            <p class="text-xs text-slate-400">Eventos hoy</p>
+            <p class="text-2xl font-semibold" x-text="todayEvents().length"></p>
           </div>
-          <div class="bg-white rounded-3xl p-5 shadow-sm">
-            <p class="text-gray-400 text-xs uppercase tracking-wide font-medium">Compras</p>
-            <p class="text-2xl font-bold text-gray-800 mt-1" x-text="shopping.length"></p>
-            <p class="text-gray-400 text-xs mt-1">pendientes</p>
+          <div class="bg-white rounded-3xl p-4 border border-slate-100">
+            <p class="text-xs text-slate-400">Compras pendientes</p>
+            <p class="text-2xl font-semibold" x-text="shoppingPending.length"></p>
           </div>
         </div>
 
-        <!-- Today -->
-        <div x-show="todayEvents().length > 0">
-          <h3 class="text-xs uppercase tracking-wide font-semibold text-gray-400 mb-2 px-1">Hoy</h3>
-          <template x-for="e in todayEvents()" :key="e.id">
-            <div class="bg-white rounded-2xl p-4 mb-2 shadow-sm flex items-start gap-3 border-l-4 border-orange-400">
-              <div class="text-orange-300 font-mono text-sm pt-0.5 min-w-[40px]" x-text="fmtTime(e.start)"></div>
-              <div class="flex-1 min-w-0">
-                <p class="font-semibold text-gray-800 truncate" x-text="e.title"></p>
-                <p x-show="e.location" class="text-gray-400 text-xs mt-0.5 truncate">📍 <span x-text="e.location"></span></p>
-              </div>
-              <span x-show="e.responsible_nickname"
-                class="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full flex-shrink-0 font-medium"
-                x-text="e.responsible_nickname"></span>
-            </div>
+        <div class="bg-white rounded-3xl p-4 border border-slate-100">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-medium">Tareas de Julieta</h3>
+            <span class="text-xs text-iosBlue">Hoy</span>
+          </div>
+          <template x-for="item in memberTasks('julieta')" :key="item.id">
+            <p class="text-sm py-1">• <span x-text="item.title"></span></p>
+          </template>
+          <p x-show="memberTasks('julieta').length===0" class="text-sm text-slate-400">Sin tareas asignadas.</p>
+        </div>
+
+        <div class="bg-white rounded-3xl p-4 border border-slate-100">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-medium">Tareas de Mauro</h3>
+            <span class="text-xs text-iosBlue">Hoy</span>
+          </div>
+          <template x-for="item in memberTasks('mauro')" :key="item.id">
+            <p class="text-sm py-1">• <span x-text="item.title"></span></p>
+          </template>
+          <p x-show="memberTasks('mauro').length===0" class="text-sm text-slate-400">Sin tareas asignadas.</p>
+        </div>
+      </section>
+
+      <section x-show="view==='agenda'" class="space-y-3">
+        <div class="bg-white rounded-3xl p-1 border border-slate-100 inline-flex w-full">
+          <template x-for="tab in ['hoy','semana','mes']" :key="tab">
+            <button @click="agendaFilter=tab" class="flex-1 py-2 rounded-2xl text-sm capitalize"
+              :class="agendaFilter===tab ? 'bg-iosBlue text-white' : 'text-slate-500'" x-text="tab"></button>
           </template>
         </div>
 
-        <!-- Upcoming preview -->
-        <div x-show="upcomingEvents().length > 0">
-          <div class="flex justify-between items-center mb-2 px-1">
-            <h3 class="text-xs uppercase tracking-wide font-semibold text-gray-400">Próximos</h3>
-            <button @click="view='calendar'" class="text-orange-500 text-xs font-medium">Ver todos →</button>
-          </div>
-          <template x-for="e in upcomingEvents().slice(0,3)" :key="e.id">
-            <div class="bg-white rounded-2xl p-4 mb-2 shadow-sm flex items-start gap-3">
-              <div class="text-gray-400 text-xs pt-0.5 min-w-[70px] font-medium" x-text="fmtDateShort(e.start)"></div>
-              <div class="flex-1 min-w-0">
-                <p class="font-medium text-gray-700 truncate" x-text="e.title"></p>
-                <p x-show="e.location" class="text-gray-400 text-xs truncate">📍 <span x-text="e.location"></span></p>
+        <template x-for="event in filteredAgenda()" :key="event.id + event.start">
+          <article class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
+            <div class="flex justify-between items-start gap-2">
+              <div>
+                <p class="text-sm text-slate-500" x-text="fmtAgendaDate(event.start)"></p>
+                <h3 class="font-semibold" x-text="event.title"></h3>
               </div>
-              <span x-show="e.responsible_nickname"
-                class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full flex-shrink-0"
-                x-text="e.responsible_nickname"></span>
+              <span class="text-xs px-2 py-1 rounded-full bg-slate-100" x-text="event.responsible_nickname || 'sin responsable'"></span>
             </div>
-          </template>
-        </div>
-
-        <!-- Shopping preview -->
-        <div x-show="shopping.length > 0">
-          <div class="flex justify-between items-center mb-2 px-1">
-            <h3 class="text-xs uppercase tracking-wide font-semibold text-gray-400">Lista de compras</h3>
-            <button @click="view='shopping'" class="text-orange-500 text-xs font-medium">Ver todo →</button>
-          </div>
-          <div class="bg-white rounded-2xl p-4 shadow-sm">
-            <template x-for="item in shopping.slice(0,5)" :key="item.id">
-              <div class="flex items-center py-2 border-b border-gray-50 last:border-0">
-                <span class="text-gray-700 text-sm" x-text="item.name"></span>
-                <span x-show="item.quantity" class="text-gray-400 text-xs ml-1.5"
-                  x-text="`(${item.quantity}${item.unit ? ' ' + item.unit : ''})`"></span>
-              </div>
-            </template>
-            <p x-show="shopping.length > 5" class="text-gray-400 text-xs mt-2">
-              y <span x-text="shopping.length - 5"></span> más…
-            </p>
-          </div>
-        </div>
-
-        <div x-show="!loading && todayEvents().length === 0 && upcomingEvents().length === 0 && shopping.length === 0"
-          class="text-center py-12 text-gray-400">
-          <div class="text-4xl mb-3">🎉</div>
-          <p>Todo tranquilo por acá</p>
-        </div>
-      </div>
-
-      <!-- ── Agenda ── -->
-      <div x-show="view === 'calendar'" class="px-4 pt-6">
-        <h2 class="text-xl font-bold text-gray-800 mb-4">📅 Agenda</h2>
-        <div x-show="events.length === 0" class="text-center py-12 text-gray-400">
-          <div class="text-4xl mb-3">📭</div>
-          <p>Sin eventos próximos</p>
-        </div>
-        <template x-for="group in groupedEvents()" :key="group.key">
-          <div class="mb-5">
-            <h3 class="text-xs uppercase tracking-wide font-semibold mb-2 px-1"
-              :class="group.isToday ? 'text-orange-500' : 'text-gray-400'"
-              x-text="group.label"></h3>
-            <template x-for="e in group.events" :key="e.id">
-              <div class="bg-white rounded-2xl p-4 mb-2 shadow-sm flex items-start gap-3"
-                :class="group.isToday ? 'border-l-4 border-orange-400' : ''">
-                <div class="font-mono text-sm pt-0.5 min-w-[40px]"
-                  :class="group.isToday ? 'text-orange-400' : 'text-gray-400'"
-                  x-text="fmtTime(e.start)"></div>
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <p class="font-semibold text-gray-800 truncate" x-text="e.title"></p>
-                    <span x-show="e.is_recurring" class="text-xs text-gray-300" title="Evento recurrente">🔁</span>
-                  </div>
-                  <p x-show="e.location" class="text-gray-400 text-xs mt-0.5 truncate">📍 <span x-text="e.location"></span></p>
-                </div>
-                <span x-show="e.responsible_nickname"
-                  class="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full flex-shrink-0 font-medium"
-                  x-text="e.responsible_nickname"></span>
-              </div>
-            </template>
-          </div>
+            <p class="text-sm text-slate-500">📍 <span x-text="event.location || 'Sin lugar' "></span></p>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <p>🕒 <span x-text="fmtTime(event.start)"></span></p>
+              <p class="text-iosBlue">🚗 Salir <span x-text="suggestDeparture(event.start)"></span></p>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <p class="rounded-xl bg-slate-50 px-2 py-1">Llevar: <span x-text="eventDropoff(event)"></span></p>
+              <p class="rounded-xl bg-slate-50 px-2 py-1">Buscar: <span x-text="eventPickup(event)"></span></p>
+            </div>
+          </article>
         </template>
-      </div>
+      </section>
 
-      <!-- ── Compras ── -->
-      <div x-show="view === 'shopping'" class="px-4 pt-6">
-        <div class="flex justify-between items-center mb-4">
-          <h2 class="text-xl font-bold text-gray-800">🛒 Compras</h2>
-          <span class="text-gray-400 text-sm" x-text="`${shopping.length} pendiente${shopping.length !== 1 ? 's' : ''}`"></span>
+      <section x-show="view==='shopping'" class="space-y-3">
+        <div class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
+          <h3 class="font-medium">Agregar rápido</h3>
+          <div class="grid grid-cols-12 gap-2">
+            <input x-model="newShopping.name" placeholder="Leche" class="col-span-6 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newShopping.quantity" placeholder="2" class="col-span-3 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newShopping.unit" placeholder="lt" class="col-span-3 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          </div>
+          <button @click="addShopping" class="w-full bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Agregar item</button>
         </div>
-        <div x-show="shopping.length === 0" class="bg-white rounded-3xl p-10 text-center text-gray-400 shadow-sm">
-          <div class="text-4xl mb-3">🎉</div>
-          <p class="font-medium">Lista vacía — todo comprado!</p>
+
+        <div class="bg-white rounded-3xl p-4 border border-slate-100">
+          <h3 class="font-medium mb-2">Pendientes</h3>
+          <template x-for="item in shoppingPending" :key="item.id">
+            <button @click="markDone(item.id)" class="w-full text-left py-2 border-b border-slate-100 last:border-b-0 text-sm">
+              ☐ <span x-text="item.name"></span>
+            </button>
+          </template>
+          <p x-show="shoppingPending.length===0" class="text-sm text-slate-400">Nada pendiente.</p>
         </div>
-        <div class="bg-white rounded-2xl shadow-sm overflow-hidden">
-          <template x-for="item in shopping" :key="item.id">
-            <div class="flex items-center px-4 py-4 border-b border-gray-50 last:border-0 gap-3">
-              <button @click="markDone(item.id)"
-                class="w-6 h-6 rounded-full border-2 border-gray-200 hover:border-green-400 hover:bg-green-50 flex-shrink-0 transition flex items-center justify-center">
-                <svg x-show="markingDone === item.id" class="w-3 h-3 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                </svg>
-              </button>
-              <div class="flex-1">
-                <span class="text-gray-800 font-medium" x-text="item.name"></span>
-                <span x-show="item.quantity" class="text-gray-400 text-sm ml-1.5"
-                  x-text="`${item.quantity}${item.unit ? ' ' + item.unit : ''}`"></span>
+
+        <div class="bg-white rounded-3xl p-4 border border-slate-100">
+          <h3 class="font-medium mb-2">Comprados</h3>
+          <template x-for="item in shoppingDone" :key="item.id">
+            <p class="py-2 text-sm text-slate-500 border-b border-slate-100 last:border-b-0">✓ <span x-text="item.name"></span></p>
+          </template>
+          <p x-show="shoppingDone.length===0" class="text-sm text-slate-400">Aún no hay comprados.</p>
+        </div>
+      </section>
+
+      <section x-show="view==='routines'" class="space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="text-lg font-semibold">Rutinas</h3>
+          <button @click="startRoutine()" class="text-sm text-iosBlue">Nueva rutina</button>
+        </div>
+
+        <template x-for="routine in routines" :key="routine.id">
+          <article class="bg-white rounded-3xl p-4 border border-slate-100">
+            <div class="flex justify-between gap-2">
+              <div>
+                <h4 class="font-semibold" x-text="routine.title"></h4>
+                <p class="text-xs text-slate-500" x-text="routine.days.join(', ')"></p>
               </div>
+              <button class="text-xs text-iosBlue" @click="editRoutine(routine)">Editar</button>
+            </div>
+            <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+              <p>Ida: <span x-text="routine.outbound_time || '-' "></span> · <span x-text="routine.outbound_responsible || '-' "></span></p>
+              <p>Vuelta: <span x-text="routine.return_time || '-' "></span> · <span x-text="routine.return_responsible || '-' "></span></p>
+            </div>
+            <p class="mt-2 text-sm text-slate-500">Lugar: <span x-text="routine.place_name || routine.place_alias || '-' "></span></p>
+          </article>
+        </template>
+
+        <div x-show="showRoutineForm" class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
+          <input x-model="routineForm.title" placeholder="Giuseppe y Gaetano · Colegio" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="routineForm.daysInput" placeholder="Lun,Mar,Mie,Jue,Vie" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <div class="grid grid-cols-2 gap-2">
+            <input x-model="routineForm.outbound_time" placeholder="07:20" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="routineForm.return_time" placeholder="16:10" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <input x-model="routineForm.outbound_responsible" placeholder="Julieta" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="routineForm.return_responsible" placeholder="Mauro" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          </div>
+          <input x-model="routineForm.place_name" placeholder="Colegio" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <div class="flex gap-2">
+            <button @click="saveRoutine" class="flex-1 bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Guardar</button>
+            <button @click="cancelRoutine" class="flex-1 bg-slate-100 rounded-2xl py-2.5 text-sm">Cancelar</button>
+          </div>
+        </div>
+      </section>
+
+      <section x-show="view==='more'" class="space-y-3">
+        <div class="bg-white rounded-3xl p-4 border border-slate-100">
+          <h3 class="font-medium mb-2">Familia</h3>
+          <template x-for="m in family" :key="m.id">
+            <div class="py-2 border-b border-slate-100 last:border-b-0 flex justify-between text-sm gap-2">
+              <div>
+                <p class="font-medium" x-text="m.name"></p>
+                <p class="text-slate-500" x-text="`${m.role} · ${m.phone || '-'}`"></p>
+              </div>
+              <button @click="toggleMinor(m)" class="text-xs text-iosBlue" x-text="m.is_minor ? 'Menor' : 'Adulto'"></button>
             </div>
           </template>
         </div>
-        <p class="text-center text-gray-400 text-xs mt-4">Tocá el círculo para tachar un ítem</p>
-      </div>
 
-      <!-- ── Lugares ── -->
-      <div x-show="view === 'places'" class="px-4 pt-6">
-        <h2 class="text-xl font-bold text-gray-800 mb-1">📍 Lugares frecuentes</h2>
-        <p class="text-gray-400 text-xs mb-4">El agente usa estas direcciones cuando decís "colegio", "club", etc.</p>
-
-        <!-- Agregar nuevo lugar -->
-        <div class="bg-white rounded-2xl p-4 mb-4 shadow-sm">
-          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Agregar / actualizar lugar</p>
+        <div class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
+          <h3 class="font-medium">Lugares frecuentes</h3>
           <div class="space-y-2">
-            <input x-model="newPlace.alias" placeholder='Nombre corto (ej: "colegio", "club")'
-              class="w-full px-3 py-2.5 rounded-xl border border-gray-100 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300">
-            <input x-model="newPlace.name" placeholder='Nombre completo (ej: "Club Regatas Resistencia")'
-              class="w-full px-3 py-2.5 rounded-xl border border-gray-100 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300">
-            <input x-model="newPlace.address" placeholder='Dirección completa (ej: "Av Ávalos 1085, Resistencia")'
-              class="w-full px-3 py-2.5 rounded-xl border border-gray-100 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300">
+            <input x-model="newPlace.alias" placeholder="Alias" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newPlace.name" placeholder="Nombre" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newPlace.address" placeholder="Dirección" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newPlace.type" placeholder="Tipo (colegio, deporte...)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <button @click="savePlace" class="w-full bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Guardar lugar</button>
           </div>
-          <p x-show="placeError" x-text="placeError" class="text-red-400 text-xs mt-2"></p>
-          <button @click="savePlace()" :disabled="savingPlace"
-            class="mt-3 w-full bg-orange-500 hover:bg-orange-600 text-white py-2.5 rounded-xl text-sm font-semibold transition disabled:opacity-60">
-            <span x-show="!savingPlace">Guardar lugar</span>
-            <span x-show="savingPlace">Guardando…</span>
-          </button>
-        </div>
-
-        <!-- Lista de lugares -->
-        <div x-show="places.length === 0" class="text-center py-10 text-gray-400">
-          <div class="text-4xl mb-3">🗺️</div>
-          <p class="text-sm">Sin lugares guardados todavía</p>
-          <p class="text-xs mt-1">También podés decirle al asistente:<br>"el colegio es en Av. X 123"</p>
-        </div>
-        <template x-for="p in places" :key="p.alias">
-          <div class="bg-white rounded-2xl p-4 mb-2 shadow-sm flex items-start gap-3">
-            <div class="text-2xl mt-0.5">📍</div>
-            <div class="flex-1 min-w-0">
-              <p class="font-semibold text-gray-800" x-text="p.alias"></p>
-              <p class="text-gray-500 text-sm" x-text="p.name"></p>
-              <p class="text-gray-400 text-xs mt-0.5 truncate" x-text="p.address"></p>
+          <template x-for="p in places" :key="p.alias">
+            <div class="py-2 border-b border-slate-100 last:border-b-0 flex justify-between gap-3">
+              <div>
+                <p class="text-sm font-medium" x-text="p.alias"></p>
+                <p class="text-xs text-slate-500" x-text="`${p.name} · ${p.type}`"></p>
+              </div>
+              <button @click="deletePlace(p.alias)" class="text-xs text-red-500">Eliminar</button>
             </div>
-            <button @click="deletePlace(p.alias)"
-              class="text-gray-300 hover:text-red-400 transition flex-shrink-0 p-1">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-        </template>
-      </div>
-
-      <!-- ── Familia ── -->
-      <div x-show="view === 'family'" class="px-4 pt-6">
-        <h2 class="text-xl font-bold text-gray-800 mb-1">👥 Familia</h2>
-        <p class="text-gray-400 text-xs mb-4">Activá "menor" para que el agente aplique la regla llevar+retirar automáticamente.</p>
-        <div x-show="family.length === 0" class="text-center py-12 text-gray-400">
-          <div class="text-4xl mb-3">👤</div>
-          <p>No hay miembros registrados.<br><span class="text-xs">Agregá desde Supabase → family_members</span></p>
+          </template>
         </div>
-        <template x-for="m in family" :key="m.id">
-          <div class="bg-white rounded-2xl p-4 mb-3 shadow-sm flex items-center gap-4">
-            <div class="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center text-2xl flex-shrink-0"
-              x-text="memberEmoji(m.nickname)"></div>
-            <div class="flex-1 min-w-0">
-              <p class="font-semibold text-gray-800" x-text="m.name"></p>
-              <p class="text-orange-500 text-sm" x-text="`@${m.nickname}`"></p>
-              <p class="text-gray-400 text-xs truncate" x-text="m.whatsapp_number"></p>
-            </div>
-            <!-- Minor toggle -->
-            <button @click="toggleMinor(m)" :title="m.is_minor ? 'Es menor — clic para desactivar' : 'Marcar como menor'"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition flex-shrink-0"
-              :class="m.is_minor ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400 hover:bg-blue-50 hover:text-blue-400'">
-              <span>🧒</span>
-              <span x-text="m.is_minor ? 'Menor' : 'Adulto'"></span>
-            </button>
-          </div>
-        </template>
-      </div>
-
+      </section>
     </main>
 
-    <!-- Bottom Nav -->
-    <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 shadow-lg safe-bottom z-10">
-      <div class="flex justify-around items-center max-w-2xl mx-auto">
+    <nav class="fixed left-0 right-0 bottom-0 bg-white border-t border-slate-200 safe-bottom z-30">
+      <div class="max-w-3xl mx-auto grid grid-cols-5">
         <template x-for="tab in tabs" :key="tab.id">
-          <button @click="view = tab.id"
-            :class="view === tab.id ? 'text-orange-500' : 'text-gray-400'"
-            class="flex flex-col items-center py-3 px-4 flex-1 transition-colors">
-            <span class="text-xl" x-text="tab.icon"></span>
-            <span class="text-xs mt-1 font-medium" x-text="tab.label"></span>
+          <button @click="view = tab.id" class="py-3 text-xs font-medium"
+            :class="view===tab.id ? 'text-iosBlue' : 'text-slate-500'">
+            <p x-text="tab.icon"></p>
+            <p x-text="tab.label"></p>
           </button>
         </template>
       </div>
@@ -347,158 +274,200 @@
         token: null,
         view: 'home',
         tabs: [
-          { id: 'home',     icon: '🏠', label: 'Inicio' },
-          { id: 'calendar', icon: '📅', label: 'Agenda' },
+          { id: 'home', icon: '🏠', label: 'Inicio' },
+          { id: 'agenda', icon: '🗓️', label: 'Agenda' },
           { id: 'shopping', icon: '🛒', label: 'Compras' },
-          { id: 'places',   icon: '📍', label: 'Lugares' },
-          { id: 'family',   icon: '👥', label: 'Familia' },
+          { id: 'routines', icon: '🔁', label: 'Rutinas' },
+          { id: 'more', icon: '⚙️', label: 'Más' },
         ],
-        email: '', password: '', authError: '', loggingIn: false,
-        events: [], shopping: [], family: [], places: [],
-        markingDone: null,
-        newPlace: { alias: '', name: '', address: '' }, savingPlace: false, placeError: '',
+        agendaFilter: 'hoy',
+        email: '',
+        password: '',
+        authError: '',
+        loggingIn: false,
+        events: [],
+        shoppingPending: [],
+        shoppingDone: [],
+        family: [],
+        places: [],
+        routines: [],
+        newShopping: { name: '', quantity: '', unit: '' },
+        newPlace: { alias: '', name: '', address: '', type: '' },
+        showRoutineForm: false,
+        routineForm: { id: null, title: '', daysInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' },
 
         async init() {
           const { data: { session } } = await sb.auth.getSession()
-          if (session) { this.user = session.user; this.token = session.access_token; await this.loadData() }
+          if (session) {
+            this.user = session.user
+            this.token = session.access_token
+            await this.loadData()
+          }
           this.loading = false
-          sb.auth.onAuthStateChange((_e, s) => { this.user = s?.user || null; this.token = s?.access_token || null })
         },
 
         async login() {
-          this.loggingIn = true; this.authError = ''
+          this.loggingIn = true
+          this.authError = ''
           const { data, error } = await sb.auth.signInWithPassword({ email: this.email, password: this.password })
-          if (error) { this.authError = 'Email o contraseña incorrectos' }
-          else { this.user = data.user; this.token = data.session.access_token; await this.loadData() }
+          if (error) {
+            this.authError = 'Email o contraseña incorrectos'
+          } else {
+            this.user = data.user
+            this.token = data.session.access_token
+            await this.loadData()
+          }
           this.loggingIn = false
         },
 
         async logout() {
           await sb.auth.signOut()
-          this.user = null; this.token = null; this.events = []; this.shopping = []; this.family = []; this.places = []
+          this.user = null
+          this.token = null
+        },
+
+        async api(path, options = {}) {
+          const res = await fetch(`/app/api${path}`, {
+            ...options,
+            headers: {
+              Authorization: `Bearer ${this.token}`,
+              'Content-Type': 'application/json',
+              ...(options.headers || {}),
+            },
+          })
+          if (res.status === 401) {
+            await this.logout()
+            return null
+          }
+          return res.ok ? res.json() : null
         },
 
         async loadData() {
-          await Promise.all([this.loadEvents(), this.loadShopping(), this.loadFamily(), this.loadPlaces()])
+          const [events, shopping, family, places, routines] = await Promise.all([
+            this.api('/events'),
+            this.api('/shopping'),
+            this.api('/family'),
+            this.api('/places'),
+            this.api('/routines'),
+          ])
+          this.events = events || []
+          this.shoppingPending = shopping?.pending || []
+          this.shoppingDone = shopping?.done || []
+          this.family = family || []
+          this.places = places || []
+          this.routines = routines || []
         },
 
-        async api(path, opts = {}) {
-          const r = await fetch(`/app/api${path}`, {
-            ...opts,
-            headers: { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json', ...(opts.headers||{}) }
-          })
-          if (r.status === 401) { await this.logout(); return null }
-          return r.ok ? r.json() : null
-        },
-
-        async loadEvents()   { const d = await this.api('/events');   if (d) this.events = d },
-        async loadShopping() { const d = await this.api('/shopping'); if (d) this.shopping = d },
-        async loadFamily()   { const d = await this.api('/family');   if (d) this.family = d },
-        async loadPlaces()   { const d = await this.api('/places');   if (d) this.places = d },
-
-        async toggleMinor(member) {
-          member.is_minor = !member.is_minor
-          await this.api(`/family/${member.id}/minor`, { method: 'PUT', body: JSON.stringify({ is_minor: member.is_minor }) })
-        },
-
-        async savePlace() {
-          this.placeError = ''
-          const { alias, name, address } = this.newPlace
-          if (!alias.trim() || !address.trim()) { this.placeError = 'Nombre corto y dirección son obligatorios'; return }
-          this.savingPlace = true
-          const d = await this.api('/places', { method: 'POST', body: JSON.stringify({ alias: alias.trim().toLowerCase(), name: name.trim() || alias.trim(), address: address.trim() }) })
-          if (d) { await this.loadPlaces(); this.newPlace = { alias: '', name: '', address: '' } }
-          this.savingPlace = false
-        },
-
-        async deletePlace(alias) {
-          if (!confirm(`¿Eliminar "${alias}"?`)) return
-          await this.api(`/places/${alias}`, { method: 'DELETE' })
-          this.places = this.places.filter(p => p.alias !== alias)
-        },
-        async loadPlaces()   { const d = await this.api('/places');   if (d) this.places = d },
-
-        async savePlace() {
-          if (!this.newPlace.alias || !this.newPlace.address) { this.placeError = 'Alias y dirección son obligatorios'; return }
-          this.savingPlace = true; this.placeError = ''
-          const d = await this.api('/places', { method: 'POST', body: JSON.stringify(this.newPlace) })
-          if (d) {
-            const idx = this.places.findIndex(p => p.alias === d.alias)
-            if (idx >= 0) this.places[idx] = d; else this.places.push(d)
-            this.places = [...this.places].sort((a,b) => a.alias.localeCompare(b.alias))
-            this.newPlace = { alias: '', name: '', address: '' }
-          }
-          this.savingPlace = false
-        },
-
-        async deletePlace(alias) {
-          if (!confirm(`¿Eliminar "${alias}"?`)) return
-          await this.api(`/places/${alias}`, { method: 'DELETE' })
-          this.places = this.places.filter(p => p.alias !== alias)
-        },
-
-        async toggleMinor(member) {
-          member.is_minor = !member.is_minor
-          await this.api(`/family/${member.id}/minor`, { method: 'PUT', body: JSON.stringify({ is_minor: member.is_minor }) })
+        async addShopping() {
+          if (!this.newShopping.name.trim()) return
+          await this.api('/shopping', { method: 'POST', body: JSON.stringify(this.newShopping) })
+          this.newShopping = { name: '', quantity: '', unit: '' }
+          await this.loadData()
         },
 
         async markDone(id) {
-          this.markingDone = id
           await this.api(`/shopping/${id}/done`, { method: 'PUT' })
-          this.shopping = this.shopping.filter(i => i.id !== id)
-          this.markingDone = null
+          await this.loadData()
         },
 
-        // Computed
-        todayEvents() {
-          const t = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
-          return this.events.filter(e => new Date(e.start).toLocaleDateString('en-CA', { timeZone: AR_TZ }) === t)
+        async toggleMinor(member) {
+          member.is_minor = !member.is_minor
+          member.role = member.is_minor ? 'Menor' : 'Adulto'
+          await this.api(`/family/${member.id}/minor`, { method: 'PUT', body: JSON.stringify({ is_minor: member.is_minor }) })
         },
-        upcomingEvents() {
-          const t = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
-          return this.events.filter(e => new Date(e.start).toLocaleDateString('en-CA', { timeZone: AR_TZ }) !== t)
+
+        async savePlace() {
+          if (!this.newPlace.alias || !this.newPlace.address) return
+          await this.api('/places', { method: 'POST', body: JSON.stringify({ alias: this.newPlace.alias, name: this.newPlace.name || this.newPlace.alias, address: this.newPlace.address, place_type: this.newPlace.type || 'general' }) })
+          this.newPlace = { alias: '', name: '', address: '', type: '' }
+          await this.loadData()
         },
-        groupedEvents() {
-          const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
-          const groups = {}
-          for (const e of this.events) {
-            const k = new Date(e.start).toLocaleDateString('en-CA', { timeZone: AR_TZ })
-            if (!groups[k]) groups[k] = { key: k, label: this.fmtDayLabel(e.start), isToday: k === todayStr, events: [] }
-            groups[k].events.push(e)
+
+        async deletePlace(alias) {
+          await this.api(`/places/${alias}`, { method: 'DELETE' })
+          await this.loadData()
+        },
+
+        startRoutine() {
+          this.showRoutineForm = true
+          this.routineForm = { id: null, title: '', daysInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' }
+        },
+
+        editRoutine(routine) {
+          this.showRoutineForm = true
+          this.routineForm = {
+            ...routine,
+            daysInput: (routine.days || []).join(','),
           }
-          return Object.values(groups).sort((a,b) => a.key.localeCompare(b.key))
         },
 
-        // Formatting
+        cancelRoutine() {
+          this.showRoutineForm = false
+        },
+
+        async saveRoutine() {
+          const payload = {
+            ...this.routineForm,
+            days: this.routineForm.daysInput.split(',').map((d) => d.trim()).filter(Boolean),
+            is_active: true,
+          }
+          await this.api('/routines', { method: 'POST', body: JSON.stringify(payload) })
+          this.showRoutineForm = false
+          await this.loadData()
+        },
+
+        todayEvents() {
+          const now = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
+          return this.events.filter((e) => new Date(e.start).toLocaleDateString('en-CA', { timeZone: AR_TZ }) === now)
+        },
+
+        filteredAgenda() {
+          const now = new Date()
+          return this.events.filter((e) => {
+            const date = new Date(e.start)
+            if (this.agendaFilter === 'hoy') return date.toDateString() === now.toDateString()
+            if (this.agendaFilter === 'semana') {
+              const diff = (date - now) / (1000 * 60 * 60 * 24)
+              return diff >= 0 && diff <= 7
+            }
+            return date.getMonth() === now.getMonth()
+          })
+        },
+
+        memberTasks(memberName) {
+          return this.todayEvents().filter((e) => (e.responsible_nickname || '').toLowerCase().includes(memberName))
+        },
+
+        nextDepartureLabel() {
+          const event = this.filteredAgenda().find((e) => new Date(e.start) > new Date())
+          return event ? this.suggestDeparture(event.start) : 'Sin salidas pendientes'
+        },
+
+        suggestDeparture(startIso) {
+          const start = new Date(startIso)
+          const leave = new Date(start.getTime() - 30 * 60 * 1000)
+          return leave.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: AR_TZ })
+        },
+
+        eventDropoff(event) {
+          return event.responsible_nickname ? `Sí · ${event.responsible_nickname}` : 'No definido'
+        },
+
+        eventPickup(event) {
+          return event.responsible_nickname ? `Sí · ${event.responsible_nickname}` : 'No definido'
+        },
+
         fmtTime(iso) {
-          return new Date(iso).toLocaleTimeString('es-AR', { timeZone: AR_TZ, hour: '2-digit', minute: '2-digit', hour12: false })
+          return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: AR_TZ })
         },
-        fmtDateShort(iso) {
-          const d = new Date(iso)
-          const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
-          const dStr = d.toLocaleDateString('en-CA', { timeZone: AR_TZ })
-          if (dStr === todayStr) return 'Hoy ' + this.fmtTime(iso)
-          return d.toLocaleDateString('es-AR', { timeZone: AR_TZ, weekday: 'short', day: 'numeric', month: 'short' })
+
+        fmtAgendaDate(iso) {
+          return new Date(iso).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short', timeZone: AR_TZ })
         },
-        fmtDayLabel(iso) {
-          const d = new Date(iso)
-          const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: AR_TZ })
-          const tomorrowStr = (() => { const t = new Date(); t.setDate(t.getDate()+1); return t.toLocaleDateString('en-CA', { timeZone: AR_TZ }) })()
-          const dStr = d.toLocaleDateString('en-CA', { timeZone: AR_TZ })
-          if (dStr === todayStr) return 'Hoy'
-          if (dStr === tomorrowStr) return 'Mañana'
-          return d.toLocaleDateString('es-AR', { timeZone: AR_TZ, weekday: 'long', day: 'numeric', month: 'long' })
-        },
-        greeting() {
-          const h = parseInt(new Date().toLocaleString('es-AR', { timeZone: AR_TZ, hour: 'numeric', hour12: false }))
-          return h < 12 ? 'Buenos días ☀️' : h < 20 ? 'Buenas tardes 🌤' : 'Buenas noches 🌙'
-        },
-        dateStr() {
-          return new Date().toLocaleDateString('es-AR', { timeZone: AR_TZ, weekday: 'long', day: 'numeric', month: 'long' })
-        },
-        memberEmoji(nick) {
-          const m = { papa: '👨', mama: '👩', abuelo: '👴', abuela: '👵' }
-          return m[nick?.toLowerCase()] || '🧑'
+
+        headerTitle() {
+          const names = { home: 'Inicio', agenda: 'Agenda', shopping: 'Compras', routines: 'Rutinas', more: 'Configuración' }
+          return names[this.view] || 'FamApp'
         },
       }
     }

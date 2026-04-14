@@ -102,6 +102,20 @@ class KnownPlace(BaseModel):
     alias: str    # short key: "colegio", "club", "supermercado"
     name: str     # display name: "Club Regatas Resistencia"
     address: str  # full address for Google Maps
+    place_type: Optional[str] = "general"
+
+
+class FamilyRoutine(BaseModel):
+    id: Optional[UUID] = None
+    title: str
+    days: List[str] = Field(default_factory=list)
+    outbound_time: Optional[str] = None
+    return_time: Optional[str] = None
+    outbound_responsible: Optional[str] = None
+    return_responsible: Optional[str] = None
+    place_alias: Optional[str] = None
+    place_name: Optional[str] = None
+    is_active: bool = True
 
 
 # ── Shopping ──────────────────────────────────────────────────────────────────
