@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -173,6 +174,53 @@ def _build_rrule(days_of_week: List[str], until_date: Optional[str]) -> str:
     return rrule
 
 
+def _normalize_time_str(raw: Any, default: str = "09:00") -> str:
+    """Normalize flexible time strings into HH:MM 24-hour format.
+
+    Accepts variants commonly used in WhatsApp messages:
+    - "7.30", "7:30", "07:30"
+    - "7:30 am", "12pm"
+    - "14hs", "17 hs", "14 h"
+    - "7" (treated as 07:00)
+    """
+    if raw is None:
+        return default
+
+    text = str(raw).strip().lower()
+    if not text:
+        return default
+
+    # Normalize separators and remove common Spanish suffixes.
+    text = text.replace(".", ":")
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s*h(?:s)?\b", "", text).strip()
+
+    # HH(:MM)? with optional am/pm
+    m = re.match(r"^(\d{1,2})(?::(\d{1,2}))?\s*(am|pm)?$", text)
+    if not m:
+        return default
+
+    hour = int(m.group(1))
+    minute = int(m.group(2) or 0)
+    meridian = m.group(3)
+
+    if minute < 0 or minute > 59:
+        return default
+
+    if meridian:
+        if hour < 1 or hour > 12:
+            return default
+        if meridian == "am":
+            hour = 0 if hour == 12 else hour
+        else:  # pm
+            hour = 12 if hour == 12 else hour + 12
+    else:
+        if hour < 0 or hour > 23:
+            return default
+
+    return f"{hour:02d}:{minute:02d}"
+
+
 async def handle_schedule(
     sender: str,
     raw_text: str,
@@ -233,7 +281,7 @@ async def handle_schedule(
             created_msgs = []
             for ev_data in ev_list:
                 date_str = ev_data.get("date", datetime.now().strftime("%Y-%m-%d"))
-                time_str = ev_data.get("time", "09:00")
+                time_str = _normalize_time_str(ev_data.get("time"), default="09:00")
                 duration = int(ev_data.get("duration_minutes", 60))
                 responsible = ev_data.get("responsible") or None
                 # Resolve location alias → full address (fallback if LLM didn't resolve it)
@@ -274,8 +322,8 @@ async def handle_schedule(
                 start_date = ev_data.get("start_date", datetime.now(AR_TZ).strftime("%Y-%m-%d"))
                 until_date = ev_data.get("until_date", f"{datetime.now(AR_TZ).year}-12-31")
                 days_of_week: List[str] = ev_data.get("days_of_week", [])
-                start_time = ev_data.get("start_time", "09:00")
-                end_time = ev_data.get("end_time")
+                start_time = _normalize_time_str(ev_data.get("start_time"), default="09:00")
+                end_time = _normalize_time_str(ev_data.get("end_time"), default="09:15") if ev_data.get("end_time") else None
                 responsible = ev_data.get("responsible") or None
 
                 if not days_of_week:
