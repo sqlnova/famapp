@@ -13,8 +13,10 @@ from langchain_openai import ChatOpenAI
 from agents.schedule.calendar_client import (
     AR_TZ,
     create_event,
+    delete_event,
     format_events_for_whatsapp,
     list_upcoming_events,
+    update_event,
 )
 from core.config import get_settings
 from core.models import CalendarEvent
@@ -29,6 +31,8 @@ Tu tarea es determinar si el usuario quiere:
 - "list"             : consultar próximos eventos
 - "create"           : crear uno o varios eventos únicos
 - "recurring_create" : crear uno o varios eventos recurrentes
+- "update"           : modificar un evento existente
+- "delete"           : eliminar un evento existente
 
 ═══════════════════════════════════════════════════
 REGLA CRÍTICA — HORARIOS DE CHICOS / ACTIVIDADES
@@ -80,7 +84,7 @@ Los horarios son siempre zona horaria Argentina (UTC-3).
 
 Respondé SIEMPRE en JSON sin markdown con arrays "events":
 {{
-  "action": "list" | "create" | "recurring_create",
+  "action": "list" | "create" | "recurring_create" | "update" | "delete",
   "events": [
     {{
       // Para "create":
@@ -99,6 +103,19 @@ Respondé SIEMPRE en JSON sin markdown con arrays "events":
       "end_time": "HH:MM",
       "location": str | null,
       "responsible": str | null
+    }},
+    {{
+      // Para "update" o "delete":
+      "target": str,               // texto para identificar evento (título/lugar)
+      "date": "YYYY-MM-DD" | null, // opcional para desambiguar
+
+      // Solo para "update" (campos a cambiar):
+      "new_title": str | null,
+      "new_date": "YYYY-MM-DD" | null,
+      "new_time": "HH:MM" | null,
+      "new_duration_minutes": int | null,
+      "new_location": str | null,
+      "new_responsible": str | null
     }}
   ],
   "days_ahead": int
@@ -274,6 +291,87 @@ async def handle_schedule(
             # Show until date from the last event processed
             until_note = f"\n🔁 Hasta el {until_date}" if until_date else ""
             return header + "\n" + "\n".join(created_msgs) + until_note
+
+        elif action in {"update", "delete"}:
+            ev_list = plan.get("events") or ([plan["event"]] if plan.get("event") else [])
+            if not ev_list:
+                return "No pude identificar qué evento querés modificar/eliminar."
+
+            upcoming = list_upcoming_events(days=60, max_results=100)
+            results: List[str] = []
+            for ev_data in ev_list:
+                target = (ev_data.get("target") or "").strip().lower()
+                target_date = ev_data.get("date")
+
+                candidates = [
+                    e for e in upcoming
+                    if (
+                        target in e.title.lower()
+                        or target in (e.location or "").lower()
+                        or not target
+                    )
+                ]
+                if target_date:
+                    candidates = [
+                        e for e in candidates
+                        if e.start.astimezone(AR_TZ).strftime("%Y-%m-%d") == target_date
+                    ]
+
+                if not candidates:
+                    date_note = f" del {target_date}" if target_date else ""
+                    results.append(f"⚠️ No encontré eventos para '{target or 'ese criterio'}'{date_note}.")
+                    continue
+                if len(candidates) > 1:
+                    preview = "\n".join(
+                        f"• {e.title} ({e.start.astimezone(AR_TZ).strftime('%-d/%-m %H:%M')})"
+                        for e in candidates[:3]
+                    )
+                    results.append(
+                        "⚠️ Encontré varios eventos posibles. Decime uno más específico:\n" + preview
+                    )
+                    continue
+
+                event = candidates[0]
+                if not event.id:
+                    results.append(f"⚠️ No pude identificar el ID de *{event.title}* para operar.")
+                    continue
+                if action == "delete":
+                    delete_event(event.id)
+                    results.append(f"🗑️ Eliminé *{event.title}*.")
+                    continue
+
+                current_local_start = event.start.astimezone(AR_TZ)
+                new_date = ev_data.get("new_date")
+                new_time = ev_data.get("new_time")
+                new_duration = ev_data.get("new_duration_minutes")
+                if new_duration is None:
+                    current_duration = int((event.end - event.start).total_seconds() // 60)
+                    duration_minutes = current_duration if current_duration > 0 else 60
+                else:
+                    duration_minutes = int(new_duration)
+
+                updated_start = event.start
+                updated_end = event.end
+                if new_date or new_time:
+                    use_date = new_date or current_local_start.strftime("%Y-%m-%d")
+                    use_time = new_time or current_local_start.strftime("%H:%M")
+                    updated_start = AR_TZ.localize(datetime.fromisoformat(f"{use_date}T{use_time}:00"))
+                    updated_end = updated_start + timedelta(minutes=duration_minutes)
+
+                updates: Dict[str, Any] = {"start": updated_start, "end": updated_end}
+                if "new_title" in ev_data:
+                    updates["title"] = ev_data.get("new_title")
+                if "new_location" in ev_data:
+                    updates["location"] = resolve_place_address(ev_data.get("new_location") or "", known_places)
+                if "new_responsible" in ev_data:
+                    updates["responsible_nickname"] = ev_data.get("new_responsible")
+
+                updated = update_event(event.id, updates)
+                results.append(
+                    f"✏️ Actualicé *{updated.title}* para {updated.start.astimezone(AR_TZ).strftime('%-d/%-m %H:%M')}."
+                )
+
+            return "\n".join(results)
 
         else:
             days = int(plan.get("days_ahead", 7))
