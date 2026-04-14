@@ -131,9 +131,9 @@
 
       <section x-show="view==='agenda'" class="space-y-3">
         <div class="bg-white rounded-3xl p-1 border border-slate-100 inline-flex w-full">
-          <template x-for="tab in ['hoy','semana','mes']" :key="tab">
-            <button @click="agendaFilter=tab" class="flex-1 py-2 rounded-2xl text-sm capitalize"
-              :class="agendaFilter===tab ? 'bg-iosBlue text-white' : 'text-slate-500'" x-text="tab"></button>
+          <template x-for="tab in agendaTabs" :key="tab.value">
+            <button @click="agendaFilter=tab.value" class="flex-1 py-2 rounded-2xl text-sm capitalize"
+              :class="agendaFilter===tab.value ? 'bg-iosBlue text-white' : 'text-slate-500'" x-text="tab.label"></button>
           </template>
         </div>
 
@@ -260,7 +260,10 @@
 
       <section x-show="view==='routines'" class="space-y-3">
         <div class="flex justify-between items-center">
-          <h3 class="text-lg font-semibold">Rutinas</h3>
+          <div>
+            <h3 class="text-lg font-semibold">Rutinas</h3>
+            <p class="text-xs text-slate-500">Cargá traslados repetidos (ida/vuelta) como colegio, club o terapia.</p>
+          </div>
           <button @click="startRoutine()" class="text-sm text-iosBlue">Nueva rutina</button>
         </div>
 
@@ -388,6 +391,11 @@
           { id: 'shopping', icon: '🛒', label: 'Compras' },
           { id: 'routines', icon: '🔁', label: 'Rutinas' },
           { id: 'more', icon: '⚙️', label: 'Más' },
+        ],
+        agendaTabs: [
+          { value: 'hoy', label: 'Diaria' },
+          { value: 'semana', label: 'Semana' },
+          { value: 'mes', label: 'Mes' },
         ],
         agendaFilter: 'hoy',
         selectedAgendaDate: null,
