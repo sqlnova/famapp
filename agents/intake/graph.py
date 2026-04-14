@@ -64,6 +64,7 @@ async def run_intake(
     sender: str,
     raw_text: str,
 ) -> Optional[str]:
+    logger.info("intake_run_started", message_sid=message_sid, sender=sender, raw_text=raw_text)
     initial_state: IntakeState = {
         "messages": [],
         "raw_text": raw_text,
@@ -81,6 +82,15 @@ async def run_intake(
         await update_message_status(message_sid, MessageStatus.PROCESSING)
         final_state = await intake_graph.ainvoke(initial_state)
         response_text: Optional[str] = final_state.get("response_text")
+        logger.info(
+            "intake_run_finished",
+            message_sid=message_sid,
+            sender=sender,
+            raw_text=raw_text,
+            intent=(final_state.get("intent") or IntentType.UNKNOWN).value,
+            entities=final_state.get("entities", {}),
+            route=final_state.get("route_to"),
+        )
 
         await update_message_status(
             message_sid,
@@ -97,7 +107,7 @@ async def run_intake(
         return response_text
 
     except Exception:
-        logger.exception("intake_graph_error", message_sid=message_sid)
+        logger.exception("intake_graph_error", message_sid=message_sid, sender=sender, raw_text=raw_text)
         await update_message_status(message_sid, MessageStatus.FAILED)
         error_msg = "Ocurrió un error procesando tu mensaje. Intentá de nuevo."
         send_whatsapp_message(sender, error_msg)
