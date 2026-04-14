@@ -103,6 +103,23 @@ def test_handle_shopping_question_lists_instead_of_adding_phrase():
     assert add_mock.await_count == 0
 
 
+def test_handle_shopping_bulk_mark_done_marks_all_pending():
+    from agents.intake.nodes import handle_shopping
+
+    state = make_state(
+        raw_text="compras realizadas, tachar todo",
+        intent=IntentType.SHOPPING,
+        entities={"action": "mark_done", "items": []},
+    )
+
+    with patch("agents.intake.tools.mark_all_pending_shopping_items_done", new=AsyncMock(return_value=4)) as mark_all_mock:
+        result = asyncio.run(handle_shopping(state))
+
+    assert result["route_to"] == "direct"
+    assert "taché todos" in result["response_text"].lower()
+    assert mark_all_mock.await_count == 1
+
+
 def test_incoming_whatsapp_sender_phone_strips_prefix():
     from core.models import IncomingWhatsAppMessage
 

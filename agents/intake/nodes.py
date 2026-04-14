@@ -170,7 +170,7 @@ def _infer_shopping_action(entities: Dict[str, Any], raw_text: str) -> str:
     if is_question and any(p in normalized for p in list_patterns):
         return "list"
 
-    if any(k in normalized for k in ("tacha", "tachá", "ya compre", "ya compré", "comprado", "marca ")):
+    if any(k in normalized for k in ("tacha", "tachá", "ya compre", "ya compré", "comprado", "marca ", "eliminar ")):
         return "mark_done"
 
     return "add"
@@ -218,9 +218,24 @@ def _extract_shopping_items(entities: Dict[str, Any], raw_text: str, action: str
     return deduped
 
 
+def _is_bulk_mark_done_request(raw_text: str) -> bool:
+    normalized = (raw_text or "").strip().lower()
+    bulk_patterns = (
+        "tachar todo",
+        "tacha todo",
+        "tachá todo",
+        "eliminar todo",
+        "borrar todo",
+        "marcar todo",
+        "todo comprado",
+        "compras realizadas",
+    )
+    return any(p in normalized for p in bulk_patterns)
+
+
 async def handle_shopping(state: IntakeState) -> Dict[str, Any]:
     """Process shopping requests within Intake."""
-    from agents.intake.tools import add_item_to_shopping_list, list_shopping_items, mark_items_done
+    from agents.intake.tools import add_item_to_shopping_list, list_shopping_items, mark_all_items_done, mark_items_done
 
     entities = state.get("entities", {})
     action = _infer_shopping_action(entities, state.get("raw_text", ""))
@@ -235,12 +250,15 @@ async def handle_shopping(state: IntakeState) -> Dict[str, Any]:
     )
 
     try:
-        if action == "mark_done" and items:
-            names = [item.get("name", "") for item in items if item.get("name")]
-            if names:
-                response_text = await mark_items_done.ainvoke({"names": names})
+        if action == "mark_done":
+            if _is_bulk_mark_done_request(state.get("raw_text", "")):
+                response_text = await mark_all_items_done.ainvoke({})
             else:
-                response_text = "¿Qué ítem querés tachar de la lista?"
+                names = [item.get("name", "") for item in items if item.get("name")]
+                if names:
+                    response_text = await mark_items_done.ainvoke({"names": names})
+                else:
+                    response_text = "¿Qué ítem querés tachar de la lista?"
 
         elif items:
             responses = []

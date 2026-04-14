@@ -9,6 +9,7 @@ from langchain_core.tools import tool
 from core.supabase_client import (
     add_shopping_item,
     get_pending_shopping_items,
+    mark_all_pending_shopping_items_done,
     mark_shopping_items_done_by_names,
 )
 from core.models import ShoppingItem
@@ -63,3 +64,12 @@ async def mark_items_done(names: List[str]) -> str:
     if count == 0:
         return f"No encontré {done_str} en la lista pendiente. ¿Ya estaba tachado?"
     return f"✅ Listo, tachê {done_str} de la lista."
+
+
+@tool
+async def mark_all_items_done() -> str:
+    """Mark all pending shopping list items as purchased/done."""
+    count = await mark_all_pending_shopping_items_done()
+    if count == 0:
+        return "La lista ya estaba vacía o todo ya estaba tachado. ✅"
+    return f"✅ Listo, taché todos los items pendientes ({count})."
