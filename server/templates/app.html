@@ -450,11 +450,19 @@
         },
 
         eventDropoff(event) {
-          return event.responsible_nickname ? `Sí · ${event.responsible_nickname}` : 'No definido'
+          if (!event.responsible_nickname) return 'No definido'
+          const t = (event.title || '').toLowerCase()
+          if (t.includes('buscar') || t.includes('retirar') || t.includes('retira')) return 'No'
+          return `Sí · ${event.responsible_nickname}`
         },
 
         eventPickup(event) {
-          return event.responsible_nickname ? `Sí · ${event.responsible_nickname}` : 'No definido'
+          if (!event.responsible_nickname) return 'No definido'
+          const t = (event.title || '').toLowerCase()
+          if (t.includes('buscar') || t.includes('retirar') || t.includes('retira')) {
+            return `Sí · ${event.responsible_nickname}`
+          }
+          return 'No'
         },
 
         fmtTime(iso) {
