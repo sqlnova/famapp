@@ -102,11 +102,25 @@
             <h3 class="font-medium">Tareas por miembro</h3>
             <span class="text-xs text-iosBlue">Hoy</span>
           </div>
+          <div class="grid grid-cols-12 gap-2 mb-3">
+            <input x-model="newTask.title" placeholder="Nueva tarea (ej: comprar regalo)" class="col-span-6 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <select x-model="newTask.assignee" class="col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm">
+              <option value="">Sin asignar</option>
+              <template x-for="m in family" :key="`task-opt-${m.id}`">
+                <option :value="m.nickname" x-text="m.name"></option>
+              </template>
+            </select>
+            <input x-model="newTask.due_date" type="date" class="col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm">
+          </div>
+          <button @click="addTask" class="w-full mb-3 bg-iosBlue text-white rounded-2xl py-2 text-sm">Agregar tarea</button>
           <template x-for="m in family" :key="`task-${m.id}`">
             <div class="mb-2">
               <p class="text-sm font-medium" x-text="m.name"></p>
-              <template x-for="item in memberTasks(m)" :key="`${m.id}-${item.id}-${item.start}`">
-                <p class="text-sm text-slate-600">• <span x-text="item.title"></span></p>
+              <template x-for="item in memberTasks(m)" :key="`${m.id}-${item.id || item.title}-${item.start || item.due_date}`">
+                <div class="flex items-center justify-between gap-2 text-sm text-slate-600">
+                  <p>• <span x-text="item.title"></span></p>
+                  <button x-show="item.id && !item.auto_generated" @click="markTaskDone(item.id)" class="text-xs text-iosBlue">Hecha</button>
+                </div>
               </template>
               <p x-show="memberTasks(m).length===0" class="text-xs text-slate-400">Sin tareas asignadas.</p>
             </div>
@@ -223,9 +237,22 @@
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
           <h3 class="font-medium mb-2">Pendientes</h3>
           <template x-for="item in shoppingPending" :key="item.id">
-            <button @click="markDone(item.id)" class="w-full text-left py-2 border-b border-slate-100 last:border-b-0 text-sm">
-              ☐ <span x-text="item.name"></span>
-            </button>
+            <div class="py-2 border-b border-slate-100 last:border-b-0 text-sm space-y-1">
+              <div x-show="editingShoppingId!==item.id" class="flex items-center justify-between gap-2">
+                <button @click="markDone(item.id)" class="text-left flex-1">☐ <span x-text="item.name"></span></button>
+                <div class="flex gap-2">
+                  <button @click="startEditShopping(item)" class="text-xs text-iosBlue">Editar</button>
+                  <button @click="deleteShopping(item.id)" class="text-xs text-red-500">Eliminar</button>
+                </div>
+              </div>
+              <div x-show="editingShoppingId===item.id" class="grid grid-cols-12 gap-2">
+                <input x-model="shoppingEdit.name" class="col-span-6 rounded-xl border border-slate-200 px-2 py-1">
+                <input x-model="shoppingEdit.quantity" class="col-span-3 rounded-xl border border-slate-200 px-2 py-1">
+                <input x-model="shoppingEdit.unit" class="col-span-3 rounded-xl border border-slate-200 px-2 py-1">
+                <button @click="saveShoppingEdit(item.id)" class="col-span-6 bg-iosBlue text-white rounded-xl py-1">Guardar</button>
+                <button @click="cancelShoppingEdit" class="col-span-6 bg-slate-100 rounded-xl py-1">Cancelar</button>
+              </div>
+            </div>
           </template>
           <p x-show="shoppingPending.length===0" class="text-sm text-slate-400">Nada pendiente.</p>
         </div>
@@ -370,10 +397,14 @@
         loggingIn: false,
         events: [],
         shoppingPending: [],
+        editingShoppingId: null,
+        shoppingEdit: { name: '', quantity: '', unit: '' },
         family: [],
         places: [],
         routines: [],
+        tasks: [],
         newShopping: { name: '', quantity: '', unit: '' },
+        newTask: { title: '', assignee: '', due_date: '' },
         newPlace: { alias: '', name: '', address: '', type: '' },
         showMemberForm: false,
         memberForm: { id: null, name: '', nickname: '', phone: '', is_minor: false },
@@ -430,18 +461,20 @@
         },
 
         async loadData() {
-          const [events, shopping, family, places, routines] = await Promise.all([
+          const [events, shopping, family, places, routines, tasks] = await Promise.all([
             this.api('/events'),
             this.api('/shopping'),
             this.api('/family'),
             this.api('/places'),
             this.api('/routines'),
+            this.api('/tasks'),
           ])
           this.events = events || []
           this.shoppingPending = shopping?.pending || []
           this.family = family || []
           this.places = places || []
           this.routines = routines || []
+          this.tasks = tasks || []
         },
 
         async addShopping() {
@@ -453,6 +486,30 @@
 
         async markDone(id) {
           await this.api(`/shopping/${id}/done`, { method: 'PUT' })
+          await this.loadData()
+        },
+
+        startEditShopping(item) {
+          this.editingShoppingId = item.id
+          this.shoppingEdit = { name: item.name || '', quantity: item.quantity || '', unit: item.unit || '' }
+        },
+
+        cancelShoppingEdit() {
+          this.editingShoppingId = null
+          this.shoppingEdit = { name: '', quantity: '', unit: '' }
+        },
+
+        async saveShoppingEdit(itemId) {
+          if (!this.shoppingEdit.name.trim()) return
+          await this.api(`/shopping/${itemId}`, { method: 'PUT', body: JSON.stringify(this.shoppingEdit) })
+          this.cancelShoppingEdit()
+          await this.loadData()
+        },
+
+        async deleteShopping(itemId) {
+          const ok = window.confirm('¿Eliminar este producto de la lista compartida?')
+          if (!ok) return
+          await this.api(`/shopping/${itemId}`, { method: 'DELETE' })
           await this.loadData()
         },
 
@@ -486,6 +543,18 @@
           if (!this.memberForm.name.trim()) return
           await this.api('/family', { method: 'POST', body: JSON.stringify(this.memberForm) })
           this.showMemberForm = false
+          await this.loadData()
+        },
+
+        async addTask() {
+          if (!this.newTask.title.trim()) return
+          await this.api('/tasks', { method: 'POST', body: JSON.stringify(this.newTask) })
+          this.newTask = { title: '', assignee: '', due_date: '' }
+          await this.loadData()
+        },
+
+        async markTaskDone(taskId) {
+          await this.api(`/tasks/${taskId}`, { method: 'PUT', body: JSON.stringify({ status: 'done' }) })
           await this.loadData()
         },
 
@@ -685,11 +754,65 @@
         memberTasks(member) {
           const nick = (member.nickname || '').toLowerCase()
           const memberName = (member.name || '').toLowerCase()
-          return this.todayEvents().filter((e) => {
+          const eventTasks = this.todayEvents().filter((e) => {
             const responsible = (e.responsible_nickname || '').toLowerCase()
             const children = (e.children || []).map((c) => c.toLowerCase())
             return responsible === nick || children.includes(memberName) || children.includes(nick)
+          }).map((e) => ({ title: e.title, start: e.start, auto_generated: true }))
+          const manualTasks = this.tasks
+            .filter((t) => t.status !== 'done')
+            .filter((t) => (t.assignee || '').toLowerCase() === nick)
+          const generated = this.generatedTasksFromEvents()
+            .filter((t) => (t.assignee || '').toLowerCase() === nick)
+          return [...manualTasks, ...eventTasks, ...generated]
+        },
+
+        generatedTasksFromEvents() {
+          const out = []
+          this.events.forEach((e) => {
+            const title = (e.title || '').toLowerCase()
+            const dueDate = this.toDateKey(new Date(e.start))
+            const children = e.children || []
+            const assignee = e.responsible_nickname || ''
+
+            if (title.includes('cumple')) {
+              out.push({
+                id: `auto-bday-${e.id}`,
+                title: `Comprar regalo para ${children.join(', ') || e.title} (antes del ${dueDate})`,
+                assignee,
+                due_date: dueDate,
+                auto_generated: true,
+              })
+            }
+            if (title.includes('prueba')) {
+              out.push({
+                id: `auto-test-${e.id}`,
+                title: `Estudiar con ${children.join(', ') || 'los chicos'}: prueba el ${dueDate}`,
+                assignee,
+                due_date: dueDate,
+                auto_generated: true,
+              })
+            }
+            if (title.includes('llevar')) {
+              out.push({
+                id: `auto-carry-${e.id}`,
+                title: `${e.title} · revisar mochila para ${children.join(', ') || 'colegio'} (${dueDate})`,
+                assignee,
+                due_date: dueDate,
+                auto_generated: true,
+              })
+            }
+            if (title.includes('autoriz') || title.includes('firma')) {
+              out.push({
+                id: `auto-sign-${e.id}`,
+                title: `Firmar autorización: ${e.title} (${dueDate})`,
+                assignee,
+                due_date: dueDate,
+                auto_generated: true,
+              })
+            }
           })
+          return out
         },
 
         todaysRoutines() {

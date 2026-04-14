@@ -222,6 +222,35 @@ async def mark_done(item_id: UUID, user=Depends(require_auth)):
     return {"ok": True}
 
 
+@router.put("/api/shopping/{item_id}")
+async def update_shopping(
+    item_id: UUID,
+    payload: Dict[str, Any] = Body(...),
+    user=Depends(require_auth),
+):
+    client = get_supabase()
+    update_payload = {
+        "name": (payload.get("name") or "").strip(),
+        "quantity": (payload.get("quantity") or "").strip() or None,
+        "unit": (payload.get("unit") or "").strip() or None,
+    }
+    if not update_payload["name"]:
+        raise HTTPException(status_code=400, detail="name es obligatorio")
+    result = client.table("shopping_items").update(update_payload).eq("id", str(item_id)).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Item no encontrado")
+    return {"ok": True}
+
+
+@router.delete("/api/shopping/{item_id}")
+async def delete_shopping(item_id: UUID, user=Depends(require_auth)):
+    client = get_supabase()
+    result = client.table("shopping_items").delete().eq("id", str(item_id)).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Item no encontrado")
+    return {"ok": True}
+
+
 @router.get("/api/family")
 async def api_family(user=Depends(require_auth)):
     members = get_family_members()
@@ -275,6 +304,75 @@ async def save_family_member(payload: Dict[str, Any] = Body(...), user=Depends(r
         "phone": member["whatsapp_number"].replace("whatsapp:", ""),
         "is_minor": member["is_minor"],
     }
+
+
+@router.get("/api/tasks")
+async def api_tasks(user=Depends(require_auth)):
+    client = get_supabase()
+    rows = (
+        client.table("tasks")
+        .select("*")
+        .eq("agent", "family_task")
+        .neq("status", "cancelled")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return [
+        {
+            "id": row["id"],
+            "title": (row.get("payload") or {}).get("title"),
+            "assignee": (row.get("payload") or {}).get("assignee"),
+            "due_date": (row.get("payload") or {}).get("due_date"),
+            "notes": (row.get("payload") or {}).get("notes"),
+            "status": row.get("status", "pending"),
+        }
+        for row in rows.data
+    ]
+
+
+@router.post("/api/tasks")
+async def create_task(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title es obligatorio")
+    client = get_supabase()
+    result = client.table("tasks").insert(
+        {
+            "agent": "family_task",
+            "payload": {
+                "title": title,
+                "assignee": payload.get("assignee"),
+                "due_date": payload.get("due_date"),
+                "notes": payload.get("notes"),
+            },
+            "status": payload.get("status", "pending"),
+        }
+    ).execute()
+    return {"id": result.data[0]["id"]}
+
+
+@router.put("/api/tasks/{task_id}")
+async def update_task(task_id: UUID, payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    client = get_supabase()
+    data: Dict[str, Any] = {}
+    if "status" in payload:
+        data["status"] = payload["status"]
+    if any(k in payload for k in ["title", "assignee", "due_date", "notes"]):
+        data["payload"] = {
+            "title": payload.get("title"),
+            "assignee": payload.get("assignee"),
+            "due_date": payload.get("due_date"),
+            "notes": payload.get("notes"),
+        }
+    client.table("tasks").update(data).eq("id", str(task_id)).eq("agent", "family_task").execute()
+    return {"ok": True}
+
+
+@router.delete("/api/tasks/{task_id}")
+async def delete_task(task_id: UUID, user=Depends(require_auth)):
+    client = get_supabase()
+    client.table("tasks").update({"status": "cancelled"}).eq("id", str(task_id)).eq("agent", "family_task").execute()
+    return {"ok": True}
 
 
 # ── Places ────────────────────────────────────────────────────────────────────
