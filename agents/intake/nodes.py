@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+import re
+from typing import Any, Dict, List
 
 import structlog
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
+from core.intake_fallbacks import detect_fallback_route
 from core.config import get_settings
 from core.models import IntentType
 from agents.intake.state import IntakeState
@@ -104,7 +106,7 @@ async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=state["raw_text"]),
     ]
-    logger.info("intake_parsing", sender=state["sender"], text=state["raw_text"][:100])
+    logger.info("intake_parsing", sender=state["sender"], raw_text=state["raw_text"])
     response = await llm.ainvoke(messages)
     content = response.content
 
@@ -121,7 +123,13 @@ async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
     except ValueError:
         intent = IntentType.UNKNOWN
 
-    logger.info("intake_classified", intent=intent, confidence=parsed.get("confidence", 0.0))
+    logger.info(
+        "intake_classified",
+        raw_text=state["raw_text"],
+        intent=intent.value,
+        confidence=parsed.get("confidence", 0.0),
+        entities=parsed.get("entities", {}),
+    )
 
     return {
         "messages": state["messages"] + [HumanMessage(content=state["raw_text"]), response],
@@ -133,35 +141,99 @@ async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
     }
 
 
+def _clean_shopping_item_name(name: str) -> str:
+    cleaned = (name or "").strip().lower()
+    cleaned = re.sub(r"^(comprar|compra|agregar|agrega|agregá|agregue|anota|anotá)\s+", "", cleaned)
+    cleaned = re.sub(r"^(la|el|los|las|un|una)\s+", "", cleaned)
+    return cleaned.strip(" .,!?:;")
+
+
+def _extract_shopping_items(entities: Dict[str, Any], raw_text: str) -> List[Dict[str, str]]:
+    items: List[Dict[str, str]] = []
+    raw_items = entities.get("items", []) if isinstance(entities, dict) else []
+    for item in raw_items:
+        if isinstance(item, dict):
+            name = _clean_shopping_item_name(str(item.get("name", "")))
+            if not name:
+                continue
+            items.append(
+                {
+                    "name": name,
+                    "quantity": str(item.get("quantity", "") or ""),
+                    "unit": str(item.get("unit", "") or ""),
+                }
+            )
+        elif isinstance(item, str):
+            name = _clean_shopping_item_name(item)
+            if name:
+                items.append({"name": name, "quantity": "", "unit": ""})
+
+    if items:
+        return items
+
+    text = (raw_text or "").strip()
+    if not text:
+        return []
+    normalized = text.lower()
+    normalized = re.sub(r"^(comprar|compra|agregar|agrega|agregá|anota|anotá)\s+", "", normalized)
+    parts = re.split(r",| y | e |;", normalized)
+    deduped: List[Dict[str, str]] = []
+    seen = set()
+    for part in parts:
+        name = _clean_shopping_item_name(part)
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        deduped.append({"name": name, "quantity": "", "unit": ""})
+    return deduped
+
+
 async def handle_shopping(state: IntakeState) -> Dict[str, Any]:
     """Process shopping requests within Intake."""
     from agents.intake.tools import add_item_to_shopping_list, list_shopping_items, mark_items_done
 
     entities = state.get("entities", {})
     action = entities.get("action", "")
-    items = entities.get("items", [])
+    items = _extract_shopping_items(entities, state.get("raw_text", ""))
+    logger.info(
+        "intake_shopping_handler_input",
+        raw_text=state.get("raw_text", ""),
+        intent=(state.get("intent") or IntentType.UNKNOWN).value,
+        entities=entities,
+        action=action,
+        items=items,
+    )
 
-    if action == "mark_done" and items:
-        names = [item.get("name", "") for item in items if item.get("name")]
-        if names:
-            response_text = await mark_items_done.ainvoke({"names": names})
+    try:
+        if action == "mark_done" and items:
+            names = [item.get("name", "") for item in items if item.get("name")]
+            if names:
+                response_text = await mark_items_done.ainvoke({"names": names})
+            else:
+                response_text = "¿Qué ítem querés tachar de la lista?"
+
+        elif items:
+            responses = []
+            for item in items:
+                result = await add_item_to_shopping_list.ainvoke({
+                    "name": item.get("name", ""),
+                    "quantity": item.get("quantity", ""),
+                    "unit": item.get("unit", ""),
+                    "added_by": state["sender"],
+                })
+                responses.append(result)
+            response_text = " ".join(responses)
+
         else:
-            response_text = "¿Qué ítem querés tachar de la lista?"
-
-    elif items:
-        responses = []
-        for item in items:
-            result = await add_item_to_shopping_list.ainvoke({
-                "name": item.get("name", ""),
-                "quantity": item.get("quantity", ""),
-                "unit": item.get("unit", ""),
-                "added_by": state["sender"],
-            })
-            responses.append(result)
-        response_text = " ".join(responses)
-
-    else:
-        response_text = await list_shopping_items.ainvoke({})
+            response_text = await list_shopping_items.ainvoke({})
+    except Exception:
+        logger.exception(
+            "shopping_handler_error",
+            raw_text=state.get("raw_text", ""),
+            intent=(state.get("intent") or IntentType.UNKNOWN).value,
+            entities=entities,
+        )
+        raise
 
     return {"response_text": response_text, "route_to": "direct"}
 
@@ -242,4 +314,19 @@ async def determine_route(state: IntakeState) -> str:
         IntentType.PLACES:    "handle_places",
         IntentType.UNKNOWN:   "build_response",
     }
-    return route_map.get(intent, "build_response")
+    route = route_map.get(intent, "build_response")
+    fallback = detect_fallback_route(state.get("raw_text", ""))
+    if fallback == "shopping" and route == "build_response":
+        route = "handle_shopping"
+    elif fallback == "schedule" and route == "build_response":
+        route = "handle_schedule"
+
+    logger.info(
+        "intake_route_selected",
+        raw_text=state.get("raw_text", ""),
+        intent=(intent or IntentType.UNKNOWN).value,
+        entities=state.get("entities", {}),
+        route=route,
+        fallback=fallback,
+    )
+    return route
