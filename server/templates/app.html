@@ -102,11 +102,25 @@
             <h3 class="font-medium">Tareas por miembro</h3>
             <span class="text-xs text-iosBlue">Hoy</span>
           </div>
+          <div class="grid grid-cols-12 gap-2 mb-3">
+            <input x-model="newTask.title" placeholder="Nueva tarea (ej: comprar regalo)" class="col-span-6 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <select x-model="newTask.assignee" class="col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm">
+              <option value="">Sin asignar</option>
+              <template x-for="m in family" :key="`task-opt-${m.id}`">
+                <option :value="m.nickname" x-text="m.name"></option>
+              </template>
+            </select>
+            <input x-model="newTask.due_date" type="date" class="col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm">
+          </div>
+          <button @click="addTask" class="w-full mb-3 bg-iosBlue text-white rounded-2xl py-2 text-sm">Agregar tarea</button>
           <template x-for="m in family" :key="`task-${m.id}`">
             <div class="mb-2">
               <p class="text-sm font-medium" x-text="m.name"></p>
-              <template x-for="item in memberTasks(m)" :key="`${m.id}-${item.id}-${item.start}`">
-                <p class="text-sm text-slate-600">• <span x-text="item.title"></span></p>
+              <template x-for="item in memberTasks(m)" :key="`${m.id}-${item.id || item.title}-${item.start || item.due_date}`">
+                <div class="flex items-center justify-between gap-2 text-sm text-slate-600">
+                  <p>• <span x-text="item.title"></span></p>
+                  <button x-show="item.id && !item.auto_generated" @click="markTaskDone(item.id)" class="text-xs text-iosBlue">Hecha</button>
+                </div>
               </template>
               <p x-show="memberTasks(m).length===0" class="text-xs text-slate-400">Sin tareas asignadas.</p>
             </div>
@@ -123,27 +137,71 @@
           </template>
         </div>
 
-        <template x-for="event in filteredAgenda()" :key="event.id + event.start">
-          <article class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
-            <div class="flex justify-between items-start gap-2">
-              <div>
-                <p class="text-sm text-slate-500" x-text="fmtAgendaDate(event.start)"></p>
-                <h3 class="font-semibold" x-text="event.title"></h3>
-              </div>
-              <span class="text-xs px-2 py-1 rounded-full bg-slate-100" x-text="event.responsible_nickname || 'sin responsable'"></span>
+        <template x-if="agendaFilter==='hoy'">
+          <div class="space-y-3">
+            <template x-for="event in filteredAgenda()" :key="event.id + event.start">
+              <article class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
+                <div class="flex justify-between items-start gap-2">
+                  <div>
+                    <p class="text-sm text-slate-500" x-text="fmtAgendaDate(event.start)"></p>
+                    <h3 class="font-semibold" x-text="event.title"></h3>
+                  </div>
+                  <span class="text-xs px-2 py-1 rounded-full bg-slate-100" x-text="event.responsible_nickname || 'sin responsable'"></span>
+                </div>
+                <p class="text-sm text-slate-500">📍 <span x-text="event.location || 'Sin lugar' "></span></p>
+                <p class="text-xs text-slate-500" x-show="(event.children || []).length">👶 <span x-text="event.children.join(', ')"></span></p>
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                  <p>🕒 <span x-text="fmtTime(event.start)"></span></p>
+                  <p class="text-iosBlue">🚗 Salir <span x-text="suggestDeparture(event.start)"></span></p>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                  <p class="rounded-xl bg-slate-50 px-2 py-1">Llevar: <span x-text="eventDropoff(event)"></span></p>
+                  <p class="rounded-xl bg-slate-50 px-2 py-1">Buscar: <span x-text="eventPickup(event)"></span></p>
+                </div>
+                <div class="flex gap-3">
+                  <button @click="editEvent(event)" class="text-xs text-iosBlue">Editar evento</button>
+                  <button @click="deleteEvent(event)" class="text-xs text-red-500">Eliminar</button>
+                </div>
+              </article>
+            </template>
+            <p x-show="filteredAgenda().length===0" class="text-sm text-slate-400">No hay eventos para este día.</p>
+          </div>
+        </template>
+
+        <template x-if="agendaFilter==='semana'">
+          <div class="bg-white rounded-3xl p-3 border border-slate-100">
+            <div class="grid grid-cols-7 gap-2">
+              <template x-for="day in weekDays()" :key="day.key">
+                <button @click="openDay(day.date)" class="rounded-2xl border p-2 text-left min-h-24"
+                  :class="day.isToday ? 'border-iosBlue bg-iosBlue/5' : 'border-slate-200'">
+                  <p class="text-[11px] text-slate-500" x-text="day.weekday"></p>
+                  <p class="font-semibold text-sm" x-text="day.day"></p>
+                  <p class="text-[11px] text-iosBlue mt-1" x-text="`${day.events.length} tareas`"></p>
+                </button>
+              </template>
             </div>
-            <p class="text-sm text-slate-500">📍 <span x-text="event.location || 'Sin lugar' "></span></p>
-            <p class="text-xs text-slate-500" x-show="(event.children || []).length">👶 <span x-text="event.children.join(', ')"></span></p>
-            <div class="grid grid-cols-2 gap-2 text-sm">
-              <p>🕒 <span x-text="fmtTime(event.start)"></span></p>
-              <p class="text-iosBlue">🚗 Salir <span x-text="suggestDeparture(event.start)"></span></p>
+          </div>
+        </template>
+
+        <template x-if="agendaFilter==='mes'">
+          <div class="bg-white rounded-3xl p-3 border border-slate-100 space-y-2">
+            <div class="grid grid-cols-7 gap-1 text-[11px] text-slate-500">
+              <template x-for="wd in ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom']" :key="wd">
+                <p class="text-center" x-text="wd"></p>
+              </template>
             </div>
-            <div class="grid grid-cols-2 gap-2 text-xs">
-              <p class="rounded-xl bg-slate-50 px-2 py-1">Llevar: <span x-text="eventDropoff(event)"></span></p>
-              <p class="rounded-xl bg-slate-50 px-2 py-1">Buscar: <span x-text="eventPickup(event)"></span></p>
+            <div class="grid grid-cols-7 gap-1">
+              <template x-for="cell in monthGrid()" :key="cell.key">
+                <button @click="openDay(cell.date)" class="min-h-24 rounded-xl border p-1 text-left align-top"
+                  :class="cell.inMonth ? 'border-slate-200' : 'border-slate-100 bg-slate-50 text-slate-400'">
+                  <p class="text-xs font-semibold" x-text="cell.day"></p>
+                  <template x-for="line in memberTaskSummary(cell.events)" :key="line">
+                    <p class="text-[10px] truncate text-slate-600" x-text="line"></p>
+                  </template>
+                </button>
+              </template>
             </div>
-            <button @click="editEvent(event)" class="text-xs text-iosBlue">Editar evento</button>
-          </article>
+          </div>
         </template>
 
         <div x-show="showEventForm" class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
@@ -179,9 +237,22 @@
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
           <h3 class="font-medium mb-2">Pendientes</h3>
           <template x-for="item in shoppingPending" :key="item.id">
-            <button @click="markDone(item.id)" class="w-full text-left py-2 border-b border-slate-100 last:border-b-0 text-sm">
-              ☐ <span x-text="item.name"></span>
-            </button>
+            <div class="py-2 border-b border-slate-100 last:border-b-0 text-sm space-y-1">
+              <div x-show="editingShoppingId!==item.id" class="flex items-center justify-between gap-2">
+                <button @click="markDone(item.id)" class="text-left flex-1">☐ <span x-text="item.name"></span></button>
+                <div class="flex gap-2">
+                  <button @click="startEditShopping(item)" class="text-xs text-iosBlue">Editar</button>
+                  <button @click="deleteShopping(item.id)" class="text-xs text-red-500">Eliminar</button>
+                </div>
+              </div>
+              <div x-show="editingShoppingId===item.id" class="grid grid-cols-12 gap-2">
+                <input x-model="shoppingEdit.name" class="col-span-6 rounded-xl border border-slate-200 px-2 py-1">
+                <input x-model="shoppingEdit.quantity" class="col-span-3 rounded-xl border border-slate-200 px-2 py-1">
+                <input x-model="shoppingEdit.unit" class="col-span-3 rounded-xl border border-slate-200 px-2 py-1">
+                <button @click="saveShoppingEdit(item.id)" class="col-span-6 bg-iosBlue text-white rounded-xl py-1">Guardar</button>
+                <button @click="cancelShoppingEdit" class="col-span-6 bg-slate-100 rounded-xl py-1">Cancelar</button>
+              </div>
+            </div>
           </template>
           <p x-show="shoppingPending.length===0" class="text-sm text-slate-400">Nada pendiente.</p>
         </div>
@@ -319,16 +390,21 @@
           { id: 'more', icon: '⚙️', label: 'Más' },
         ],
         agendaFilter: 'hoy',
+        selectedAgendaDate: null,
         email: '',
         password: '',
         authError: '',
         loggingIn: false,
         events: [],
         shoppingPending: [],
+        editingShoppingId: null,
+        shoppingEdit: { name: '', quantity: '', unit: '' },
         family: [],
         places: [],
         routines: [],
+        tasks: [],
         newShopping: { name: '', quantity: '', unit: '' },
+        newTask: { title: '', assignee: '', due_date: '' },
         newPlace: { alias: '', name: '', address: '', type: '' },
         showMemberForm: false,
         memberForm: { id: null, name: '', nickname: '', phone: '', is_minor: false },
@@ -338,6 +414,7 @@
         routineForm: { id: null, title: '', daysInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' },
 
         async init() {
+          this.selectedAgendaDate = this.toDateKey(new Date())
           const { data: { session } } = await sb.auth.getSession()
           if (session) {
             this.user = session.user
@@ -384,18 +461,20 @@
         },
 
         async loadData() {
-          const [events, shopping, family, places, routines] = await Promise.all([
+          const [events, shopping, family, places, routines, tasks] = await Promise.all([
             this.api('/events'),
             this.api('/shopping'),
             this.api('/family'),
             this.api('/places'),
             this.api('/routines'),
+            this.api('/tasks'),
           ])
           this.events = events || []
           this.shoppingPending = shopping?.pending || []
           this.family = family || []
           this.places = places || []
           this.routines = routines || []
+          this.tasks = tasks || []
         },
 
         async addShopping() {
@@ -407,6 +486,30 @@
 
         async markDone(id) {
           await this.api(`/shopping/${id}/done`, { method: 'PUT' })
+          await this.loadData()
+        },
+
+        startEditShopping(item) {
+          this.editingShoppingId = item.id
+          this.shoppingEdit = { name: item.name || '', quantity: item.quantity || '', unit: item.unit || '' }
+        },
+
+        cancelShoppingEdit() {
+          this.editingShoppingId = null
+          this.shoppingEdit = { name: '', quantity: '', unit: '' }
+        },
+
+        async saveShoppingEdit(itemId) {
+          if (!this.shoppingEdit.name.trim()) return
+          await this.api(`/shopping/${itemId}`, { method: 'PUT', body: JSON.stringify(this.shoppingEdit) })
+          this.cancelShoppingEdit()
+          await this.loadData()
+        },
+
+        async deleteShopping(itemId) {
+          const ok = window.confirm('¿Eliminar este producto de la lista compartida?')
+          if (!ok) return
+          await this.api(`/shopping/${itemId}`, { method: 'DELETE' })
           await this.loadData()
         },
 
@@ -440,6 +543,18 @@
           if (!this.memberForm.name.trim()) return
           await this.api('/family', { method: 'POST', body: JSON.stringify(this.memberForm) })
           this.showMemberForm = false
+          await this.loadData()
+        },
+
+        async addTask() {
+          if (!this.newTask.title.trim()) return
+          await this.api('/tasks', { method: 'POST', body: JSON.stringify(this.newTask) })
+          this.newTask = { title: '', assignee: '', due_date: '' }
+          await this.loadData()
+        },
+
+        async markTaskDone(taskId) {
+          await this.api(`/tasks/${taskId}`, { method: 'PUT', body: JSON.stringify({ status: 'done' }) })
           await this.loadData()
         },
 
@@ -491,6 +606,32 @@
           await this.loadData()
         },
 
+        async deleteEvent(event) {
+          const isRecurring = !!event.recurring_event_id
+          if (!isRecurring) {
+            const ok = window.confirm('¿Eliminar este evento?')
+            if (!ok) return
+            await this.api(`/events/${event.id}`, { method: 'DELETE' })
+            await this.loadData()
+            return
+          }
+
+          const allSeries = window.confirm('¿Querés eliminar toda la serie?\nAceptar = serie completa / Cancelar = solo este evento')
+          if (allSeries) {
+            await this.api(`/events/${event.id}`, {
+              method: 'DELETE',
+              body: JSON.stringify({ apply_to_series: true, recurring_event_id: event.recurring_event_id }),
+            })
+            await this.loadData()
+            return
+          }
+
+          const single = window.confirm('¿Eliminar solo este evento puntual?')
+          if (!single) return
+          await this.api(`/events/${event.id}`, { method: 'DELETE' })
+          await this.loadData()
+        },
+
         startRoutine() {
           this.showRoutineForm = true
           this.routineForm = { id: null, title: '', daysInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' }
@@ -526,25 +667,152 @@
 
         filteredAgenda() {
           const now = new Date()
+          const selected = this.selectedAgendaDate ? new Date(`${this.selectedAgendaDate}T00:00:00`) : now
           return this.events.filter((e) => {
             const date = new Date(e.start)
-            if (this.agendaFilter === 'hoy') return date.toDateString() === now.toDateString()
+            if (this.agendaFilter === 'hoy') return this.toDateKey(date) === this.toDateKey(selected)
             if (this.agendaFilter === 'semana') {
-              const diff = (date - now) / (1000 * 60 * 60 * 24)
-              return diff >= 0 && diff <= 7
+              const start = this.startOfWeek(selected)
+              const diff = (this.startOfDay(date) - start) / (1000 * 60 * 60 * 24)
+              return diff >= 0 && diff < 7
             }
-            return date.getMonth() === now.getMonth()
+            return date.getMonth() === selected.getMonth() && date.getFullYear() === selected.getFullYear()
           })
+        },
+
+        openDay(date) {
+          this.selectedAgendaDate = this.toDateKey(date)
+          this.agendaFilter = 'hoy'
+        },
+
+        weekDays() {
+          const base = this.selectedAgendaDate ? new Date(`${this.selectedAgendaDate}T00:00:00`) : new Date()
+          const start = this.startOfWeek(base)
+          return Array.from({ length: 7 }).map((_, idx) => {
+            const date = new Date(start)
+            date.setDate(start.getDate() + idx)
+            const events = this.eventsForDate(date)
+            return {
+              key: this.toDateKey(date),
+              date,
+              weekday: date.toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', ''),
+              day: date.getDate(),
+              events,
+              isToday: this.toDateKey(date) === this.toDateKey(new Date()),
+            }
+          })
+        },
+
+        monthGrid() {
+          const base = this.selectedAgendaDate ? new Date(`${this.selectedAgendaDate}T00:00:00`) : new Date()
+          const firstOfMonth = new Date(base.getFullYear(), base.getMonth(), 1)
+          const offset = (firstOfMonth.getDay() + 6) % 7
+          const start = new Date(firstOfMonth)
+          start.setDate(firstOfMonth.getDate() - offset)
+          return Array.from({ length: 42 }).map((_, idx) => {
+            const date = new Date(start)
+            date.setDate(start.getDate() + idx)
+            return {
+              key: this.toDateKey(date),
+              date,
+              day: date.getDate(),
+              inMonth: date.getMonth() === base.getMonth(),
+              events: this.eventsForDate(date),
+            }
+          })
+        },
+
+        eventsForDate(date) {
+          const key = this.toDateKey(date)
+          return this.events.filter((e) => this.toDateKey(new Date(e.start)) === key)
+        },
+
+        memberTaskSummary(events) {
+          const counts = {}
+          events.forEach((e) => {
+            const key = e.responsible_nickname || 'sin responsable'
+            counts[key] = (counts[key] || 0) + 1
+          })
+          return Object.entries(counts).map(([member, count]) => `${member}: ${count}`)
+        },
+
+        startOfDay(date) {
+          return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+        },
+
+        startOfWeek(date) {
+          const d = this.startOfDay(date)
+          const day = (d.getDay() + 6) % 7
+          d.setDate(d.getDate() - day)
+          return d
+        },
+
+        toDateKey(date) {
+          return new Date(date).toLocaleDateString('en-CA')
         },
 
         memberTasks(member) {
           const nick = (member.nickname || '').toLowerCase()
           const memberName = (member.name || '').toLowerCase()
-          return this.todayEvents().filter((e) => {
+          const eventTasks = this.todayEvents().filter((e) => {
             const responsible = (e.responsible_nickname || '').toLowerCase()
             const children = (e.children || []).map((c) => c.toLowerCase())
             return responsible === nick || children.includes(memberName) || children.includes(nick)
+          }).map((e) => ({ title: e.title, start: e.start, auto_generated: true }))
+          const manualTasks = this.tasks
+            .filter((t) => t.status !== 'done')
+            .filter((t) => (t.assignee || '').toLowerCase() === nick)
+          const generated = this.generatedTasksFromEvents()
+            .filter((t) => (t.assignee || '').toLowerCase() === nick)
+          return [...manualTasks, ...eventTasks, ...generated]
+        },
+
+        generatedTasksFromEvents() {
+          const out = []
+          this.events.forEach((e) => {
+            const title = (e.title || '').toLowerCase()
+            const dueDate = this.toDateKey(new Date(e.start))
+            const children = e.children || []
+            const assignee = e.responsible_nickname || ''
+
+            if (title.includes('cumple')) {
+              out.push({
+                id: `auto-bday-${e.id}`,
+                title: `Comprar regalo para ${children.join(', ') || e.title} (antes del ${dueDate})`,
+                assignee,
+                due_date: dueDate,
+                auto_generated: true,
+              })
+            }
+            if (title.includes('prueba')) {
+              out.push({
+                id: `auto-test-${e.id}`,
+                title: `Estudiar con ${children.join(', ') || 'los chicos'}: prueba el ${dueDate}`,
+                assignee,
+                due_date: dueDate,
+                auto_generated: true,
+              })
+            }
+            if (title.includes('llevar')) {
+              out.push({
+                id: `auto-carry-${e.id}`,
+                title: `${e.title} · revisar mochila para ${children.join(', ') || 'colegio'} (${dueDate})`,
+                assignee,
+                due_date: dueDate,
+                auto_generated: true,
+              })
+            }
+            if (title.includes('autoriz') || title.includes('firma')) {
+              out.push({
+                id: `auto-sign-${e.id}`,
+                title: `Firmar autorización: ${e.title} (${dueDate})`,
+                assignee,
+                due_date: dueDate,
+                auto_generated: true,
+              })
+            }
           })
+          return out
         },
 
         todaysRoutines() {
