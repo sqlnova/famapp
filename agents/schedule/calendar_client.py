@@ -248,6 +248,37 @@ def delete_event(event_id: str) -> None:
         raise
 
 
+def list_recurring_series(
+    days: int = 365,
+    max_results: int = 250,
+) -> List[CalendarEvent]:
+    """Return recurring series masters (not individual instances)."""
+    s = get_settings()
+    service = _get_service()
+    now = datetime.now(timezone.utc)
+    time_max = now + timedelta(days=days)
+    try:
+        result = (
+            service.events()
+            .list(
+                calendarId=s.google_calendar_id,
+                timeMin=_to_utc_rfc3339(now),
+                timeMax=_to_utc_rfc3339(time_max),
+                maxResults=max_results,
+                singleEvents=False,
+            )
+            .execute()
+        )
+        items = [
+            e for e in result.get("items", [])
+            if e.get("recurrence") and not e.get("recurringEventId")
+        ]
+        return [_parse_event(e) for e in items]
+    except HttpError as e:
+        logger.error("calendar_recurring_list_error", error=str(e))
+        raise
+
+
 def format_events_for_whatsapp(events: List[CalendarEvent]) -> str:
     """Format a list of events into a readable WhatsApp message."""
     if not events:
