@@ -11,6 +11,9 @@ SCHEDULE_KEYWORDS = [
 def detect_fallback_route(text: str) -> str | None:
     normalized = (text or "").strip().lower()
 
+    if normalized in {"todo", "todos"}:
+        return "shopping"
+
     if any(k in normalized for k in SHOPPING_KEYWORDS):
         return "shopping"
 

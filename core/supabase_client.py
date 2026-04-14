@@ -83,6 +83,21 @@ async def mark_shopping_items_done_by_names(names: List[str]) -> int:
     return total
 
 
+async def mark_all_pending_shopping_items_done() -> int:
+    """Mark every pending shopping item as done. Returns count updated."""
+    client = get_supabase()
+    pending = client.table("shopping_items").select("id").eq("done", False).execute()
+    if not pending.data:
+        return 0
+    result = (
+        client.table("shopping_items")
+        .update({"done": True})
+        .eq("done", False)
+        .execute()
+    )
+    return len(result.data)
+
+
 # ── Family members ────────────────────────────────────────────────────────────
 
 def get_family_members() -> List[FamilyMember]:
