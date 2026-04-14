@@ -152,7 +152,7 @@
                 <p class="text-xs text-slate-500" x-show="(event.children || []).length">👶 <span x-text="event.children.join(', ')"></span></p>
                 <div class="grid grid-cols-2 gap-2 text-sm">
                   <p>🕒 <span x-text="fmtTime(event.start)"></span></p>
-                  <p class="text-iosBlue">🚗 Salir <span x-text="suggestDeparture(event.start)"></span></p>
+                  <p class="text-iosBlue" x-show="event.suggested_departure">🚗 Salir <span x-text="fmtTime(event.suggested_departure)"></span></p>
                 </div>
                 <div class="grid grid-cols-2 gap-2 text-xs">
                   <p class="rounded-xl bg-slate-50 px-2 py-1">Llevar: <span x-text="eventDropoff(event)"></span></p>
@@ -835,8 +835,8 @@
         },
 
         nextDepartureLabel() {
-          const event = this.filteredAgenda().find((e) => new Date(e.start) > new Date())
-          return event ? this.suggestDeparture(event.start) : 'Sin salidas pendientes'
+          const event = this.filteredAgenda().find((e) => new Date(e.start) > new Date() && e.suggested_departure)
+          return event ? this.fmtTime(event.suggested_departure) : 'Sin salidas asignadas'
         },
 
         suggestDeparture(startIso) {

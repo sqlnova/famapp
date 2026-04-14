@@ -48,6 +48,20 @@ def _suggest_departure(start: datetime, location: Optional[str]) -> str:
     return leave.astimezone(AR_TZ).isoformat()
 
 
+def _infer_user_nickname(user: Any) -> Optional[str]:
+    """Best-effort map from auth email to family nickname."""
+    email = (getattr(user, "email", "") or "").strip().lower()
+    if not email or "@" not in email:
+        return None
+    local = email.split("@", 1)[0]
+    members = get_family_members()
+    for member in members:
+        nick = (member.nickname or "").strip().lower()
+        if nick and (local == nick or local.startswith(f"{nick}.") or local.endswith(f".{nick}")):
+            return nick
+    return None
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 async def require_auth(authorization: Optional[str] = Header(None)):
@@ -91,6 +105,7 @@ async def index(request: Request):
 async def api_events(user=Depends(require_auth)):
     loop = asyncio.get_event_loop()
     events = await loop.run_in_executor(None, lambda: list_upcoming_events(days=30))
+    user_nickname = _infer_user_nickname(user)
     return [
         {
             "id": e.id,
@@ -102,7 +117,9 @@ async def api_events(user=Depends(require_auth)):
             "children": e.children,
             "recurring_event_id": e.recurring_event_id,
             "is_recurring": not e.alerts_enabled,
-            "suggested_departure": _suggest_departure(e.start, e.location),
+            "suggested_departure": _suggest_departure(e.start, e.location)
+            if user_nickname and (e.responsible_nickname or "").strip().lower() == user_nickname
+            else None,
         }
         for e in events
     ]
