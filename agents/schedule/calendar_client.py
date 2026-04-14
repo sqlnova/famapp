@@ -69,6 +69,7 @@ def _parse_event(raw: dict) -> CalendarEvent:
 
     return CalendarEvent(
         id=raw.get("id"),
+        recurring_event_id=raw.get("recurringEventId"),
         title=raw.get("summary", "(sin título)"),
         start=parse_dt(start_raw),
         end=parse_dt(end_raw),
@@ -78,6 +79,7 @@ def _parse_event(raw: dict) -> CalendarEvent:
             a["email"] for a in raw.get("attendees", []) if not a.get("self")
         ],
         responsible_nickname=responsible,
+        recurrence=raw.get("recurrence", []) or [],
         alerts_enabled=not is_recurring_instance,
     )
 

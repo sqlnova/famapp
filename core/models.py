@@ -77,6 +77,7 @@ class AgentMessage(BaseModel):
 
 class CalendarEvent(BaseModel):
     id: Optional[str] = None
+    recurring_event_id: Optional[str] = None
     title: str
     start: datetime
     end: datetime
@@ -84,6 +85,7 @@ class CalendarEvent(BaseModel):
     description: Optional[str] = None
     attendees: List[str] = Field(default_factory=list)
     responsible_nickname: Optional[str] = None  # slug from family_members table
+    recurrence: List[str] = Field(default_factory=list)
     alerts_enabled: bool = True  # False for recurring instances (no alert spam)
 
 
