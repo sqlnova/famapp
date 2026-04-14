@@ -85,6 +85,7 @@ class CalendarEvent(BaseModel):
     description: Optional[str] = None
     attendees: List[str] = Field(default_factory=list)
     responsible_nickname: Optional[str] = None  # slug from family_members table
+    children: List[str] = Field(default_factory=list)
     recurrence: List[str] = Field(default_factory=list)
     alerts_enabled: bool = True  # False for recurring instances (no alert spam)
 

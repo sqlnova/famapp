@@ -88,24 +88,30 @@
 
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
           <div class="flex items-center justify-between mb-2">
-            <h3 class="font-medium">Tareas de Julieta</h3>
-            <span class="text-xs text-iosBlue">Hoy</span>
+            <h3 class="font-medium">Rutinas de hoy</h3>
+            <span class="text-xs text-iosBlue" x-text="todaysRoutines().length"></span>
           </div>
-          <template x-for="item in memberTasks('julieta')" :key="item.id">
-            <p class="text-sm py-1">• <span x-text="item.title"></span></p>
+          <template x-for="routine in todaysRoutines()" :key="routine.id">
+            <p class="text-sm py-1">• <span x-text="routine.title"></span></p>
           </template>
-          <p x-show="memberTasks('julieta').length===0" class="text-sm text-slate-400">Sin tareas asignadas.</p>
+          <p x-show="todaysRoutines().length===0" class="text-sm text-slate-400">No hay rutinas activas para hoy.</p>
         </div>
 
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
           <div class="flex items-center justify-between mb-2">
-            <h3 class="font-medium">Tareas de Mauro</h3>
+            <h3 class="font-medium">Tareas por miembro</h3>
             <span class="text-xs text-iosBlue">Hoy</span>
           </div>
-          <template x-for="item in memberTasks('mauro')" :key="item.id">
-            <p class="text-sm py-1">• <span x-text="item.title"></span></p>
+          <template x-for="m in family" :key="`task-${m.id}`">
+            <div class="mb-2">
+              <p class="text-sm font-medium" x-text="m.name"></p>
+              <template x-for="item in memberTasks(m)" :key="`${m.id}-${item.id}-${item.start}`">
+                <p class="text-sm text-slate-600">• <span x-text="item.title"></span></p>
+              </template>
+              <p x-show="memberTasks(m).length===0" class="text-xs text-slate-400">Sin tareas asignadas.</p>
+            </div>
           </template>
-          <p x-show="memberTasks('mauro').length===0" class="text-sm text-slate-400">Sin tareas asignadas.</p>
+          <p x-show="family.length===0" class="text-sm text-slate-400">Cargá miembros para ver tareas asignadas.</p>
         </div>
       </section>
 
@@ -127,6 +133,7 @@
               <span class="text-xs px-2 py-1 rounded-full bg-slate-100" x-text="event.responsible_nickname || 'sin responsable'"></span>
             </div>
             <p class="text-sm text-slate-500">📍 <span x-text="event.location || 'Sin lugar' "></span></p>
+            <p class="text-xs text-slate-500" x-show="(event.children || []).length">👶 <span x-text="event.children.join(', ')"></span></p>
             <div class="grid grid-cols-2 gap-2 text-sm">
               <p>🕒 <span x-text="fmtTime(event.start)"></span></p>
               <p class="text-iosBlue">🚗 Salir <span x-text="suggestDeparture(event.start)"></span></p>
@@ -146,6 +153,7 @@
           <input x-model="eventForm.end" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <input x-model="eventForm.location" placeholder="Lugar" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <input x-model="eventForm.responsible_nickname" placeholder="Responsable (apodo)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.childrenInput" placeholder="Hijos (ej: Giuseppe,Gaetano)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <label class="flex items-center gap-2 text-sm" x-show="eventForm.recurring_event_id">
             <input type="checkbox" x-model="eventForm.apply_to_series">
             Aplicar cambios a toda la serie
@@ -201,6 +209,7 @@
             <p class="mt-2 text-sm text-slate-500">Lugar: <span x-text="routine.place_name || routine.place_alias || '-' "></span></p>
           </article>
         </template>
+        <p x-show="routines.length===0" class="text-sm text-slate-400">Todavía no hay rutinas guardadas.</p>
 
         <div x-show="showRoutineForm" class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
           <input x-model="routineForm.title" placeholder="Giuseppe y Gaetano · Colegio" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
@@ -324,7 +333,7 @@
         showMemberForm: false,
         memberForm: { id: null, name: '', nickname: '', phone: '', is_minor: false },
         showEventForm: false,
-        eventForm: { id: '', recurring_event_id: '', title: '', start: '', end: '', location: '', responsible_nickname: '', apply_to_series: false },
+        eventForm: { id: '', recurring_event_id: '', title: '', start: '', end: '', location: '', responsible_nickname: '', childrenInput: '', apply_to_series: false },
         showRoutineForm: false,
         routineForm: { id: null, title: '', daysInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' },
 
@@ -456,6 +465,7 @@
             end: this.toLocalDateTime(event.end),
             location: event.location || '',
             responsible_nickname: event.responsible_nickname || '',
+            childrenInput: (event.children || []).join(','),
             apply_to_series: false,
           }
         },
@@ -472,6 +482,7 @@
             end: this.toIsoWithTz(this.eventForm.end),
             location: this.eventForm.location,
             responsible_nickname: this.eventForm.responsible_nickname,
+            children: this.eventForm.childrenInput.split(',').map((c) => c.trim()).filter(Boolean),
             recurring_event_id: this.eventForm.recurring_event_id || null,
             apply_to_series: this.eventForm.apply_to_series,
           }
@@ -526,8 +537,33 @@
           })
         },
 
-        memberTasks(memberName) {
-          return this.todayEvents().filter((e) => (e.responsible_nickname || '').toLowerCase().includes(memberName))
+        memberTasks(member) {
+          const nick = (member.nickname || '').toLowerCase()
+          const memberName = (member.name || '').toLowerCase()
+          return this.todayEvents().filter((e) => {
+            const responsible = (e.responsible_nickname || '').toLowerCase()
+            const children = (e.children || []).map((c) => c.toLowerCase())
+            return responsible === nick || children.includes(memberName) || children.includes(nick)
+          })
+        },
+
+        todaysRoutines() {
+          const shortDay = new Date().toLocaleDateString('es-AR', { weekday: 'short', timeZone: AR_TZ }).toLowerCase().replace('.', '')
+          const dayMap = {
+            lun: ['lun', 'lunes'],
+            mar: ['mar', 'martes'],
+            mié: ['mie', 'mié', 'miércoles', 'miercoles'],
+            jue: ['jue', 'jueves'],
+            vie: ['vie', 'viernes'],
+            sáb: ['sab', 'sáb', 'sábado', 'sabado'],
+            dom: ['dom', 'domingo'],
+          }
+          const keys = dayMap[shortDay] || [shortDay]
+          return this.routines.filter((r) => {
+            if (!r.is_active) return false
+            const values = (r.days || []).map((d) => d.toLowerCase())
+            return values.some((d) => keys.includes(d))
+          })
         },
 
         nextDepartureLabel() {
@@ -536,6 +572,10 @@
         },
 
         suggestDeparture(startIso) {
+          const event = this.events.find((e) => e.start === startIso)
+          if (event?.suggested_departure) {
+            return this.fmtTime(event.suggested_departure)
+          }
           const start = new Date(startIso)
           const leave = new Date(start.getTime() - 30 * 60 * 1000)
           return leave.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: AR_TZ })

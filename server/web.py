@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from agents.schedule.calendar_client import AR_TZ, list_upcoming_events, update_event
+from agents.logistics.maps_client import get_travel_time
 from core.config import get_settings
 from core.models import ShoppingItem
 from core.supabase_client import (
@@ -32,6 +33,19 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/app")
 templates = Jinja2Templates(directory="server/templates")
+
+
+def _suggest_departure(start: datetime, location: Optional[str]) -> str:
+    """Suggest departure time using Maps traffic when available, fallback to -30m."""
+    minutes_before = 30
+    if location:
+        try:
+            travel = get_travel_time(destination=location, departure_time=start.astimezone(timezone.utc))
+            minutes_before = max(15, travel.duration_minutes + 10)
+        except Exception:
+            logger.info("maps_fallback_departure", location=location)
+    leave = start - timedelta(minutes=minutes_before)
+    return leave.astimezone(AR_TZ).isoformat()
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -85,8 +99,10 @@ async def api_events(user=Depends(require_auth)):
             "end": e.end.astimezone(AR_TZ).isoformat(),
             "location": e.location,
             "responsible_nickname": e.responsible_nickname,
+            "children": e.children,
             "recurring_event_id": e.recurring_event_id,
             "is_recurring": not e.alerts_enabled,
+            "suggested_departure": _suggest_departure(e.start, e.location),
         }
         for e in events
     ]
@@ -128,6 +144,7 @@ async def api_update_event(
             "end": end_dt,
             "location": payload.get("location"),
             "responsible_nickname": payload.get("responsible_nickname"),
+            "children": payload.get("children") or [],
         },
     )
     return {
@@ -138,6 +155,7 @@ async def api_update_event(
         "end": updated.end.astimezone(AR_TZ).isoformat(),
         "location": updated.location,
         "responsible_nickname": updated.responsible_nickname,
+        "children": updated.children,
     }
 
 
