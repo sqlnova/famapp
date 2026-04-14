@@ -1,6 +1,7 @@
 """Supabase client singleton."""
 from __future__ import annotations
 
+from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -9,7 +10,14 @@ import structlog
 from supabase import Client, create_client
 
 from core.config import get_settings
-from core.models import FamilyMember, KnownPlace, MessageRecord, MessageStatus, ShoppingItem
+from core.models import (
+    FamilyMember,
+    FamilyRoutine,
+    KnownPlace,
+    MessageRecord,
+    MessageStatus,
+    ShoppingItem,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -58,13 +66,26 @@ async def add_shopping_item(item: ShoppingItem) -> ShoppingItem:
 
 async def get_pending_shopping_items() -> List[ShoppingItem]:
     client = get_supabase()
-    result = client.table("shopping_items").select("*").eq("done", False).execute()
+    result = client.table("shopping_items").select("*").eq("done", False).order("added_at", desc=True).execute()
+    return [ShoppingItem(**row) for row in result.data]
+
+
+async def get_completed_shopping_items(limit: int = 50) -> List[ShoppingItem]:
+    client = get_supabase()
+    result = (
+        client.table("shopping_items")
+        .select("*")
+        .eq("done", True)
+        .order("done_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
     return [ShoppingItem(**row) for row in result.data]
 
 
 async def mark_shopping_item_done(item_id: UUID) -> None:
     client = get_supabase()
-    client.table("shopping_items").update({"done": True}).eq("id", str(item_id)).execute()
+    client.table("shopping_items").update({"done": True, "done_at": datetime.utcnow().isoformat()}).eq("id", str(item_id)).execute()
 
 
 async def mark_shopping_items_done_by_names(names: List[str]) -> int:
@@ -74,7 +95,7 @@ async def mark_shopping_items_done_by_names(names: List[str]) -> int:
     for name in names:
         result = (
             client.table("shopping_items")
-            .update({"done": True})
+            .update({"done": True, "done_at": datetime.utcnow().isoformat()})
             .ilike("name", f"%{name.strip()}%")
             .eq("done", False)
             .execute()
@@ -91,7 +112,7 @@ async def mark_all_pending_shopping_items_done() -> int:
         return 0
     result = (
         client.table("shopping_items")
-        .update({"done": True})
+        .update({"done": True, "done_at": datetime.utcnow().isoformat()})
         .eq("done", False)
         .execute()
     )
@@ -103,7 +124,7 @@ async def mark_all_pending_shopping_items_done() -> int:
 def get_family_members() -> List[FamilyMember]:
     """Return all registered family members."""
     client = get_supabase()
-    result = client.table("family_members").select("*").execute()
+    result = client.table("family_members").select("*").order("created_at").execute()
     return [FamilyMember(**r) for r in result.data]
 
 
@@ -143,11 +164,16 @@ def get_all_known_places() -> List[KnownPlace]:
     return [KnownPlace(**r) for r in result.data]
 
 
-def upsert_known_place(alias: str, name: str, address: str) -> KnownPlace:
+def upsert_known_place(alias: str, name: str, address: str, place_type: str = "general") -> KnownPlace:
     """Insert or update a known place by alias."""
     client = get_supabase()
     result = client.table("known_places").upsert(
-        {"alias": alias.lower().strip(), "name": name.strip(), "address": address.strip()},
+        {
+            "alias": alias.lower().strip(),
+            "name": name.strip(),
+            "address": address.strip(),
+            "place_type": (place_type or "general").strip().lower(),
+        },
         on_conflict="alias",
     ).execute()
     return KnownPlace(**result.data[0])
@@ -166,3 +192,17 @@ def resolve_place_address(location: str, places: Dict[str, KnownPlace]) -> str:
         return location
     key = location.strip().lower()
     return places[key].address if key in places else location
+
+
+# ── Routines ──────────────────────────────────────────────────────────────────
+
+def list_family_routines() -> List[FamilyRoutine]:
+    client = get_supabase()
+    result = client.table("family_routines").select("*").order("created_at", desc=True).execute()
+    return [FamilyRoutine(**r) for r in result.data]
+
+
+def upsert_family_routine(payload: Dict[str, Any]) -> FamilyRoutine:
+    client = get_supabase()
+    result = client.table("family_routines").upsert(payload).execute()
+    return FamilyRoutine(**result.data[0])

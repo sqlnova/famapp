@@ -120,3 +120,21 @@ famapp/
 - [ ] Implementar Logistics Agent con Google Maps + alertas cron
 - [ ] APScheduler para polling proactivo de eventos
 - [ ] Soporte multimedia (fotos de tickets, etc.)
+
+
+## Web privada (MVP)
+
+La app web autenticada está en `/app` y usa Supabase Auth para login.
+
+```bash
+python main.py
+# abrir http://localhost:8000/app
+```
+
+Módulos incluidos:
+- Inicio (resumen diario accionable)
+- Agenda (Hoy/Semana/Mes)
+- Compras (pendientes/comprados + alta rápida)
+- Rutinas familiares (crear/editar)
+- Más/Configuración (familia + lugares)
+

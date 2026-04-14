@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 import structlog
@@ -12,13 +13,18 @@ from fastapi.templating import Jinja2Templates
 
 from agents.schedule.calendar_client import AR_TZ, list_upcoming_events
 from core.config import get_settings
+from core.models import ShoppingItem
 from core.supabase_client import (
+    add_shopping_item,
     delete_known_place,
     get_all_known_places,
+    get_completed_shopping_items,
     get_family_members,
     get_pending_shopping_items,
     get_supabase,
+    list_family_routines,
     mark_shopping_item_done,
+    upsert_family_routine,
     upsert_known_place,
 )
 
@@ -70,7 +76,7 @@ async def index(request: Request):
 @router.get("/api/events")
 async def api_events(user=Depends(require_auth)):
     loop = asyncio.get_event_loop()
-    events = await loop.run_in_executor(None, lambda: list_upcoming_events(days=14))
+    events = await loop.run_in_executor(None, lambda: list_upcoming_events(days=30))
     return [
         {
             "id": e.id,
@@ -87,16 +93,45 @@ async def api_events(user=Depends(require_auth)):
 
 @router.get("/api/shopping")
 async def api_shopping(user=Depends(require_auth)):
-    items = await get_pending_shopping_items()
-    return [
-        {
-            "id": str(i.id),
-            "name": i.name,
-            "quantity": i.quantity,
-            "unit": i.unit,
-        }
-        for i in items
-    ]
+    pending, done = await asyncio.gather(get_pending_shopping_items(), get_completed_shopping_items())
+
+    def serialize(items: List[ShoppingItem]) -> List[Dict[str, Any]]:
+        return [
+            {
+                "id": str(i.id),
+                "name": i.name,
+                "quantity": i.quantity,
+                "unit": i.unit,
+                "done": i.done,
+                "added_at": i.added_at.isoformat() if i.added_at else None,
+            }
+            for i in items
+        ]
+
+    return {"pending": serialize(pending), "done": serialize(done)}
+
+
+@router.post("/api/shopping")
+async def create_shopping_item(
+    name: str = Body(...),
+    quantity: str = Body(default=""),
+    unit: str = Body(default=""),
+    user=Depends(require_auth),
+):
+    item = ShoppingItem(
+        name=name.strip(),
+        quantity=quantity.strip() or None,
+        unit=unit.strip() or None,
+        added_by=(user.email or "web").strip(),
+    )
+    inserted = await add_shopping_item(item)
+    return {
+        "id": str(inserted.id),
+        "name": inserted.name,
+        "quantity": inserted.quantity,
+        "unit": inserted.unit,
+        "done": inserted.done,
+    }
 
 
 @router.put("/api/shopping/{item_id}/done")
@@ -113,7 +148,8 @@ async def api_family(user=Depends(require_auth)):
             "id": str(m.id),
             "name": m.name,
             "nickname": m.nickname,
-            "whatsapp_number": m.whatsapp_number.replace("whatsapp:", ""),
+            "role": "Menor" if m.is_minor else "Adulto",
+            "phone": m.whatsapp_number.replace("whatsapp:", ""),
             "is_minor": m.is_minor,
         }
         for m in members
@@ -132,7 +168,7 @@ async def toggle_minor(member_id: UUID, is_minor: bool = Body(..., embed=True), 
 @router.get("/api/places")
 async def api_places(user=Depends(require_auth)):
     places = get_all_known_places()
-    return [{"alias": p.alias, "name": p.name, "address": p.address} for p in places]
+    return [{"alias": p.alias, "name": p.name, "address": p.address, "type": p.place_type or "general"} for p in places]
 
 
 @router.post("/api/places")
@@ -140,10 +176,11 @@ async def save_place(
     alias: str = Body(...),
     name: str = Body(...),
     address: str = Body(...),
+    place_type: str = Body(default="general", embed=False),
     user=Depends(require_auth),
 ):
-    place = upsert_known_place(alias, name, address)
-    return {"alias": place.alias, "name": place.name, "address": place.address}
+    place = upsert_known_place(alias, name, address, place_type)
+    return {"alias": place.alias, "name": place.name, "address": place.address, "type": place.place_type}
 
 
 @router.delete("/api/places/{alias}")
@@ -152,3 +189,57 @@ async def remove_place(alias: str, user=Depends(require_auth)):
     if not deleted:
         raise HTTPException(status_code=404, detail="Lugar no encontrado")
     return {"ok": True}
+
+
+# ── Routines ──────────────────────────────────────────────────────────────────
+
+@router.get("/api/routines")
+async def api_routines(user=Depends(require_auth)):
+    routines = list_family_routines()
+    return [
+        {
+            "id": str(r.id),
+            "title": r.title,
+            "days": r.days,
+            "outbound_time": r.outbound_time,
+            "return_time": r.return_time,
+            "outbound_responsible": r.outbound_responsible,
+            "return_responsible": r.return_responsible,
+            "place_alias": r.place_alias,
+            "place_name": r.place_name,
+            "is_active": r.is_active,
+        }
+        for r in routines
+    ]
+
+
+@router.post("/api/routines")
+async def api_save_routine(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    clean_payload = {
+        "id": payload.get("id"),
+        "title": (payload.get("title") or "Nueva rutina").strip(),
+        "days": payload.get("days") or [],
+        "outbound_time": payload.get("outbound_time") or None,
+        "return_time": payload.get("return_time") or None,
+        "outbound_responsible": payload.get("outbound_responsible") or None,
+        "return_responsible": payload.get("return_responsible") or None,
+        "place_alias": payload.get("place_alias") or None,
+        "place_name": payload.get("place_name") or None,
+        "is_active": payload.get("is_active", True),
+        "updated_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+    if not clean_payload["id"]:
+        clean_payload.pop("id")
+    routine = upsert_family_routine(clean_payload)
+    return {
+        "id": str(routine.id),
+        "title": routine.title,
+        "days": routine.days,
+        "outbound_time": routine.outbound_time,
+        "return_time": routine.return_time,
+        "outbound_responsible": routine.outbound_responsible,
+        "return_responsible": routine.return_responsible,
+        "place_alias": routine.place_alias,
+        "place_name": routine.place_name,
+        "is_active": routine.is_active,
+    }
