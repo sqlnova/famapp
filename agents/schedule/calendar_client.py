@@ -36,18 +36,30 @@ def _to_utc_rfc3339(dt: datetime) -> str:
 
 
 _RESPONSIBLE_TAG_RE = re.compile(r"\[responsable:([^\]]+)\]", re.IGNORECASE)
+_CHILDREN_TAG_RE = re.compile(r"\[hijos:([^\]]+)\]", re.IGNORECASE)
 
 
-def _extract_responsible(description: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-    """Return (clean_description, responsible_nickname) after stripping the tag."""
+def _extract_metadata(description: Optional[str]) -> tuple[Optional[str], Optional[str], List[str]]:
+    """Return (clean_description, responsible_nickname, children) after stripping tags."""
     if not description:
-        return description, None
-    m = _RESPONSIBLE_TAG_RE.search(description)
-    if not m:
-        return description, None
-    nickname = m.group(1).strip()
-    clean = description[:m.start()].rstrip() or None
-    return clean, nickname
+        return description, None, []
+
+    working = description
+    responsible = None
+    children: List[str] = []
+
+    responsible_match = _RESPONSIBLE_TAG_RE.search(working)
+    if responsible_match:
+        responsible = responsible_match.group(1).strip()
+        working = _RESPONSIBLE_TAG_RE.sub("", working)
+
+    children_match = _CHILDREN_TAG_RE.search(working)
+    if children_match:
+        children = [c.strip() for c in children_match.group(1).split(",") if c.strip()]
+        working = _CHILDREN_TAG_RE.sub("", working)
+
+    clean = working.strip() or None
+    return clean, responsible, children
 
 
 def _parse_event(raw: dict) -> CalendarEvent:
@@ -62,13 +74,14 @@ def _parse_event(raw: dict) -> CalendarEvent:
         return datetime.fromisoformat(d["date"] + "T00:00:00+00:00")
 
     raw_desc = raw.get("description")
-    clean_desc, responsible = _extract_responsible(raw_desc)
+    clean_desc, responsible, children = _extract_metadata(raw_desc)
     # Recurring event instances have recurringEventId — disable auto-alerts to
     # avoid daily spam for habitual events (school runs, weekly classes, etc.).
     is_recurring_instance = "recurringEventId" in raw
 
     return CalendarEvent(
         id=raw.get("id"),
+        recurring_event_id=raw.get("recurringEventId"),
         title=raw.get("summary", "(sin título)"),
         start=parse_dt(start_raw),
         end=parse_dt(end_raw),
@@ -78,6 +91,8 @@ def _parse_event(raw: dict) -> CalendarEvent:
             a["email"] for a in raw.get("attendees", []) if not a.get("self")
         ],
         responsible_nickname=responsible,
+        children=children,
+        recurrence=raw.get("recurrence", []) or [],
         alerts_enabled=not is_recurring_instance,
     )
 
@@ -173,6 +188,8 @@ def create_event(
     desc_parts = [event.description] if event.description else []
     if event.responsible_nickname:
         desc_parts.append(f"[responsable:{event.responsible_nickname}]")
+    if event.children:
+        desc_parts.append(f"[hijos:{','.join(event.children)}]")
     if desc_parts:
         body["description"] = "\n".join(desc_parts)
     if event.attendees:
@@ -214,11 +231,14 @@ def update_event(event_id: str, updates: dict[str, Any]) -> CalendarEvent:
             body["location"] = updates["location"] or None
 
         # Merge [responsable:nick] tag preserving existing free text.
-        existing_desc, existing_responsible = _extract_responsible(current.get("description"))
+        existing_desc, existing_responsible, existing_children = _extract_metadata(current.get("description"))
         responsible = updates.get("responsible_nickname", existing_responsible)
+        children = updates.get("children", existing_children)
         desc_parts = [existing_desc] if existing_desc else []
         if responsible:
             desc_parts.append(f"[responsable:{responsible}]")
+        if children:
+            desc_parts.append(f"[hijos:{','.join(children)}]")
         if desc_parts:
             body["description"] = "\n".join(desc_parts)
         else:
