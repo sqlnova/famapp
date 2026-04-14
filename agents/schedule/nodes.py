@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -13,8 +15,11 @@ from langchain_openai import ChatOpenAI
 from agents.schedule.calendar_client import (
     AR_TZ,
     create_event,
+    delete_event,
     format_events_for_whatsapp,
     list_upcoming_events,
+    list_recurring_series,
+    update_event,
 )
 from core.config import get_settings
 from core.models import CalendarEvent
@@ -29,6 +34,8 @@ Tu tarea es determinar si el usuario quiere:
 - "list"             : consultar próximos eventos
 - "create"           : crear uno o varios eventos únicos
 - "recurring_create" : crear uno o varios eventos recurrentes
+- "update"           : modificar un evento existente
+- "delete"           : eliminar un evento existente
 
 ═══════════════════════════════════════════════════
 REGLA CRÍTICA — HORARIOS DE CHICOS / ACTIVIDADES
@@ -80,7 +87,7 @@ Los horarios son siempre zona horaria Argentina (UTC-3).
 
 Respondé SIEMPRE en JSON sin markdown con arrays "events":
 {{
-  "action": "list" | "create" | "recurring_create",
+  "action": "list" | "create" | "recurring_create" | "update" | "delete",
   "events": [
     {{
       // Para "create":
@@ -99,6 +106,19 @@ Respondé SIEMPRE en JSON sin markdown con arrays "events":
       "end_time": "HH:MM",
       "location": str | null,
       "responsible": str | null
+    }},
+    {{
+      // Para "update" o "delete":
+      "target": str,               // texto para identificar evento (título/lugar)
+      "date": "YYYY-MM-DD" | null, // opcional para desambiguar
+
+      // Solo para "update" (campos a cambiar):
+      "new_title": str | null,
+      "new_date": "YYYY-MM-DD" | null,
+      "new_time": "HH:MM" | null,
+      "new_duration_minutes": int | null,
+      "new_location": str | null,
+      "new_responsible": str | null
     }}
   ],
   "days_ahead": int
@@ -182,6 +202,26 @@ async def handle_schedule(
             minors_context = f"MIEMBROS MENORES (aplicar regla llevar+retirar para sus actividades): {names}"
 
         plan = await plan_action(raw_text, entities, places_context, minors_context)
+        raw_norm = _normalize_text(raw_text)
+
+        # Fallback: if LLM missed update/delete intent from natural language, force it.
+        if plan.get("action") not in {"update", "delete"}:
+            if any(v in raw_norm for v in ["elimina", "eliminar", "borrar", "borra", "cancela", "cancelar"]):
+                plan = {"action": "delete", "events": []}
+            elif any(v in raw_norm for v in ["modifica", "modificar", "cambia", "cambiar", "renombra", "renombrar"]):
+                plan = {"action": "update", "events": []}
+
+        if plan.get("action") == "delete" and not plan.get("events"):
+            # "eliminar todos los eventos recurrentes"
+            if "recurrent" in raw_norm and any(x in raw_norm for x in ["todo", "todos", "todas"]):
+                plan["events"] = [{"target": "__all_recurring__"}]
+
+        if plan.get("action") == "update" and not plan.get("events"):
+            # "cambia nombre del evento recurrente de las 11.30 por Retirar..."
+            inferred = _infer_update_from_text(raw_text)
+            if inferred:
+                plan["events"] = [inferred]
+
         action = plan.get("action", "list")
 
         if action == "create":
@@ -275,6 +315,97 @@ async def handle_schedule(
             until_note = f"\n🔁 Hasta el {until_date}" if until_date else ""
             return header + "\n" + "\n".join(created_msgs) + until_note
 
+        elif action in {"update", "delete"}:
+            ev_list = plan.get("events") or ([plan["event"]] if plan.get("event") else [])
+            if not ev_list:
+                return "No pude identificar qué evento querés modificar/eliminar."
+
+            upcoming = list_upcoming_events(days=120, max_results=300)
+            results: List[str] = []
+            for ev_data in ev_list:
+                target = (ev_data.get("target") or "").strip().lower()
+                target_date = ev_data.get("date")
+                is_recurring_request = "recurrent" in raw_norm or "recurrente" in target
+
+                if action == "delete" and target == "__all_recurring__":
+                    recurring_series = list_recurring_series(days=365, max_results=250)
+                    if not recurring_series:
+                        results.append("No encontré eventos recurrentes para eliminar.")
+                        continue
+                    for rec_event in recurring_series:
+                        if rec_event.id:
+                            delete_event(rec_event.id)
+                    results.append(f"🗑️ Eliminé {len(recurring_series)} series de eventos recurrentes.")
+                    continue
+
+                candidates = [
+                    e for e in upcoming
+                    if _event_matches_target(e, target, raw_text)
+                ]
+                if is_recurring_request:
+                    candidates = [e for e in candidates if not e.alerts_enabled]
+                if target_date:
+                    candidates = [
+                        e for e in candidates
+                        if e.start.astimezone(AR_TZ).strftime("%Y-%m-%d") == target_date
+                    ]
+
+                if not candidates:
+                    date_note = f" del {target_date}" if target_date else ""
+                    results.append(f"⚠️ No encontré eventos para '{target or 'ese criterio'}'{date_note}.")
+                    continue
+                if len(candidates) > 1:
+                    preview = "\n".join(
+                        f"• {e.title} ({e.start.astimezone(AR_TZ).strftime('%-d/%-m %H:%M')})"
+                        for e in candidates[:3]
+                    )
+                    results.append(
+                        "⚠️ Encontré varios eventos posibles. Decime uno más específico:\n" + preview
+                    )
+                    continue
+
+                event = candidates[0]
+                if not event.id:
+                    results.append(f"⚠️ No pude identificar el ID de *{event.title}* para operar.")
+                    continue
+                if action == "delete":
+                    delete_event(event.id)
+                    results.append(f"🗑️ Eliminé *{event.title}*.")
+                    continue
+
+                current_local_start = event.start.astimezone(AR_TZ)
+                new_date = ev_data.get("new_date")
+                new_time = ev_data.get("new_time")
+                new_duration = ev_data.get("new_duration_minutes")
+                if new_duration is None:
+                    current_duration = int((event.end - event.start).total_seconds() // 60)
+                    duration_minutes = current_duration if current_duration > 0 else 60
+                else:
+                    duration_minutes = int(new_duration)
+
+                updated_start = event.start
+                updated_end = event.end
+                if new_date or new_time:
+                    use_date = new_date or current_local_start.strftime("%Y-%m-%d")
+                    use_time = new_time or current_local_start.strftime("%H:%M")
+                    updated_start = AR_TZ.localize(datetime.fromisoformat(f"{use_date}T{use_time}:00"))
+                    updated_end = updated_start + timedelta(minutes=duration_minutes)
+
+                updates: Dict[str, Any] = {"start": updated_start, "end": updated_end}
+                if "new_title" in ev_data:
+                    updates["title"] = ev_data.get("new_title")
+                if "new_location" in ev_data:
+                    updates["location"] = resolve_place_address(ev_data.get("new_location") or "", known_places)
+                if "new_responsible" in ev_data:
+                    updates["responsible_nickname"] = ev_data.get("new_responsible")
+
+                updated = update_event(event.id, updates)
+                results.append(
+                    f"✏️ Actualicé *{updated.title}* para {updated.start.astimezone(AR_TZ).strftime('%-d/%-m %H:%M')}."
+                )
+
+            return "\n".join(results)
+
         else:
             days = int(plan.get("days_ahead", 7))
             events = list_upcoming_events(days=days)
@@ -283,3 +414,66 @@ async def handle_schedule(
     except Exception:
         logger.exception("schedule_agent_error")
         return "No pude acceder al calendario ahora. Revisá que la cuenta de servicio tenga acceso."
+
+
+def _normalize_text(text: str) -> str:
+    text = (text or "").lower()
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+    text = re.sub(r"[^\w\s:.-]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _extract_time_tokens(text: str) -> List[str]:
+    text_n = _normalize_text(text)
+    found = re.findall(r"\b(\d{1,2})[:.](\d{2})\b", text_n)
+    tokens = []
+    for hh, mm in found:
+        tokens.append(f"{int(hh):02d}:{mm}")
+    return tokens
+
+
+def _event_matches_target(event: CalendarEvent, target: str, full_text: str) -> bool:
+    if not target:
+        return True
+    title = _normalize_text(event.title)
+    location = _normalize_text(event.location or "")
+    target_n = _normalize_text(target)
+
+    if target_n in title or target_n in location:
+        return True
+
+    # Token overlap fallback (for natural language fragments).
+    ignore = {"evento", "recurrente", "recurrentes", "de", "del", "las", "los", "la", "el"}
+    target_tokens = [t for t in target_n.split() if len(t) > 2 and t not in ignore]
+    if target_tokens and sum(1 for t in target_tokens if t in title or t in location) >= max(1, len(target_tokens) // 2):
+        return True
+
+    # Time-based fallback: "de las 11.30".
+    requested_times = _extract_time_tokens(f"{target} {full_text}")
+    if requested_times:
+        ev_time = event.start.astimezone(AR_TZ).strftime("%H:%M")
+        if ev_time in requested_times:
+            return True
+
+    return False
+
+
+def _infer_update_from_text(raw_text: str) -> Optional[Dict[str, Any]]:
+    raw_n = _normalize_text(raw_text)
+    if not any(v in raw_n for v in ["modifica", "modificar", "cambia", "cambiar", "renombra", "renombrar"]):
+        return None
+
+    time_match = re.search(r"de las?\s+(\d{1,2}[:.]\d{2})", raw_n)
+    new_title = None
+    if " por " in raw_n:
+        new_title = raw_text.split(" por ", 1)[1].strip()
+
+    inferred: Dict[str, Any] = {"target": "recurrente" if "recurrent" in raw_n else ""}
+    if time_match:
+        hhmm = time_match.group(1).replace(".", ":")
+        h, m = hhmm.split(":")
+        inferred["target"] = f"{inferred['target']} {int(h):02d}:{m}".strip()
+    if new_title:
+        inferred["new_title"] = new_title
+    return inferred

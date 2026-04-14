@@ -23,7 +23,7 @@ WhatsApp → Twilio Webhook → FastAPI
 |--------|--------|-------------|
 | **Intake** | ✅ Implementado | Recibe mensajes, clasifica intención con LLM (GPT-4o-mini), extrae entidades y rutea |
 | **Shopping** | ✅ Básico | Agrega y lista items en Supabase |
-| **Schedule** | 🔜 Stub | Crea/modifica eventos en Google Calendar |
+| **Schedule** | 🟡 En evolución | Crea, modifica y elimina eventos en Google Calendar (incluye soporte para eventos recurrentes) |
 | **Logistics** | 🔜 Stub | Calcula tiempo de viaje real con Maps y manda alertas proactivas |
 
 ## Stack
@@ -137,4 +137,3 @@ Módulos incluidos:
 - Compras (pendientes/comprados + alta rápida)
 - Rutinas familiares (crear/editar)
 - Más/Configuración (familia + lugares)
-
