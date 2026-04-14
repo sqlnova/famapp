@@ -24,7 +24,12 @@ from agents.schedule.calendar_client import (
 )
 from core.config import get_settings
 from core.models import CalendarEvent
-from core.supabase_client import get_known_places_dict, get_minor_members, resolve_place_address
+from core.supabase_client import (
+    get_family_members,
+    get_known_places_dict,
+    get_minor_members,
+    resolve_place_address,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -221,6 +226,99 @@ def _normalize_time_str(raw: Any, default: str = "09:00") -> str:
     return f"{hour:02d}:{minute:02d}"
 
 
+def _has_explicit_start_date(raw_text: str) -> bool:
+    """Heuristic: user explicitly mentioned a concrete start date."""
+    txt = raw_text or ""
+    return bool(
+        re.search(r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b", txt)
+        or re.search(r"\b\d{4}-\d{2}-\d{2}\b", txt)
+    )
+
+
+def _canonicalize_responsible(raw: Any, alias_map: Dict[str, str]) -> Optional[str]:
+    if raw is None:
+        return None
+    key = _normalize_text(str(raw))
+    return alias_map.get(key, key or None)
+
+
+def _build_responsible_alias_map() -> Dict[str, str]:
+    """Build alias -> canonical nickname map from family members plus common parent aliases."""
+    alias_map: Dict[str, str] = {}
+    try:
+        members = get_family_members()
+    except Exception:
+        members = []
+
+    for m in members:
+        canonical = _normalize_text(m.nickname)
+        if canonical:
+            alias_map[canonical] = canonical
+        name_key = _normalize_text(m.name)
+        if name_key:
+            alias_map[name_key] = canonical
+
+    # Parent-role aliases. Prefer configured parent nicknames when present.
+    mother = alias_map.get("mama") or alias_map.get("mamá") or alias_map.get("julieta") or "mama"
+    father = alias_map.get("papa") or alias_map.get("papá") or alias_map.get("mauro") or "papa"
+    for k in ["mama", "mamá", "madre", "mother"]:
+        alias_map[_normalize_text(k)] = mother
+    for k in ["papa", "papá", "padre", "father"]:
+        alias_map[_normalize_text(k)] = father
+
+    return alias_map
+
+
+def _infer_action_for_time(raw_text: str, hhmm: str) -> Optional[str]:
+    """Infer whether an event at hhmm is a dropoff (llevar) or pickup (buscar/retirar)."""
+    chunks = [c for c in (raw_text or "").splitlines() if c.strip()]
+    for raw_chunk in chunks:
+        chunk = _normalize_text(raw_chunk)
+        matches = re.findall(r"\b\d{1,2}(?::\d{1,2}|\.\d{1,2})?\s*(?:am|pm|hs?)?\b", chunk)
+        if hhmm not in {_normalize_time_str(m, default="") for m in matches}:
+            continue
+        if any(k in chunk for k in ["retira", "retirar", "busca", "buscar", "sale", "salen"]):
+            return "buscar"
+        if any(k in chunk for k in ["lleva", "llevar", "ingresa", "ingresan", "entra", "entran", " va ", " van "]):
+            return "llevar"
+    return None
+
+
+def _infer_people_for_time(raw_text: str, hhmm: str, minor_names: List[str]) -> str:
+    chunks = [c for c in (raw_text or "").splitlines() if c.strip()]
+    names_n = [(_normalize_text(n), n) for n in minor_names if n]
+    for raw_chunk in chunks:
+        chunk = _normalize_text(raw_chunk)
+        matches = re.findall(r"\b\d{1,2}(?::\d{1,2}|\.\d{1,2})?\s*(?:am|pm|hs?)?\b", chunk)
+        if hhmm not in {_normalize_time_str(m, default="") for m in matches}:
+            continue
+        found = [display for nrm, display in names_n if nrm and nrm in chunk]
+        if found:
+            if len(found) == 1:
+                return found[0]
+            if len(found) == 2:
+                return f"{found[0]} y {found[1]}"
+            return ", ".join(found[:-1]) + f" y {found[-1]}"
+    return ""
+
+
+def _build_fallback_title(raw_text: str, start_time: str, location: Optional[str], minor_names: List[str]) -> str:
+    action = _infer_action_for_time(raw_text, start_time) or "llevar"
+    people = _infer_people_for_time(raw_text, start_time, minor_names)
+    loc_n = _normalize_text(location or "")
+    if "colegio" in loc_n:
+        place_phrase = "al colegio" if action == "llevar" else "del colegio"
+    elif location:
+        place_phrase = f"a {location}" if action == "llevar" else f"de {location}"
+    else:
+        place_phrase = ""
+
+    verb = "Llevar" if action == "llevar" else "Buscar"
+    if people:
+        return f"{verb} {people} {place_phrase}".strip()
+    return f"{verb} {place_phrase}".strip()
+
+
 async def handle_schedule(
     sender: str,
     raw_text: str,
@@ -232,9 +330,11 @@ async def handle_schedule(
         try:
             known_places = get_known_places_dict()
             minors = get_minor_members()
+            responsible_aliases = _build_responsible_alias_map()
         except Exception:
             known_places = {}
             minors = []
+            responsible_aliases = _build_responsible_alias_map()
 
         places_context = ""
         if known_places:
@@ -251,6 +351,7 @@ async def handle_schedule(
 
         plan = await plan_action(raw_text, entities, places_context, minors_context)
         raw_norm = _normalize_text(raw_text)
+        minor_names = [m.name for m in minors]
 
         # Fallback: if LLM missed update/delete intent from natural language, force it.
         if plan.get("action") not in {"update", "delete"}:
@@ -283,15 +384,18 @@ async def handle_schedule(
                 date_str = ev_data.get("date", datetime.now().strftime("%Y-%m-%d"))
                 time_str = _normalize_time_str(ev_data.get("time"), default="09:00")
                 duration = int(ev_data.get("duration_minutes", 60))
-                responsible = ev_data.get("responsible") or None
+                responsible = _canonicalize_responsible(ev_data.get("responsible"), responsible_aliases)
                 # Resolve location alias → full address (fallback if LLM didn't resolve it)
                 location = resolve_place_address(ev_data.get("location") or "", known_places) or None
+                title = (ev_data.get("title") or "").strip()
+                if not title or _normalize_text(title) in {"evento", "evento recurrente"}:
+                    title = _build_fallback_title(raw_text, time_str, location, minor_names)
 
                 start_local = AR_TZ.localize(datetime.fromisoformat(f"{date_str}T{time_str}:00"))
                 end_local = start_local + timedelta(minutes=duration)
 
                 event = CalendarEvent(
-                    title=ev_data.get("title", "Evento"),
+                    title=title,
                     start=start_local,
                     end=end_local,
                     location=location,
@@ -318,13 +422,20 @@ async def handle_schedule(
             created_msgs = []
 
             for ev_data in ev_list:
-                title = ev_data.get("title", "Evento recurrente")
+                title = (ev_data.get("title") or "").strip()
                 start_date = ev_data.get("start_date", datetime.now(AR_TZ).strftime("%Y-%m-%d"))
+                if not _has_explicit_start_date(raw_text):
+                    # If user did not explicitly provide a start date, begin today.
+                    start_date = datetime.now(AR_TZ).strftime("%Y-%m-%d")
                 until_date = ev_data.get("until_date", f"{datetime.now(AR_TZ).year}-12-31")
                 days_of_week: List[str] = ev_data.get("days_of_week", [])
                 start_time = _normalize_time_str(ev_data.get("start_time"), default="09:00")
                 end_time = _normalize_time_str(ev_data.get("end_time"), default="09:15") if ev_data.get("end_time") else None
-                responsible = ev_data.get("responsible") or None
+                responsible = _canonicalize_responsible(ev_data.get("responsible"), responsible_aliases)
+                rec_location = resolve_place_address(ev_data.get("location") or "", known_places) or None
+
+                if not title or _normalize_text(title) in {"evento", "evento recurrente"}:
+                    title = _build_fallback_title(raw_text, start_time, rec_location, minor_names)
 
                 if not days_of_week:
                     continue
@@ -340,7 +451,6 @@ async def handle_schedule(
                     end_local = start_local + timedelta(minutes=15)
 
                 rrule = _build_rrule(days_of_week, until_date)
-                rec_location = resolve_place_address(ev_data.get("location") or "", known_places) or None
                 event = CalendarEvent(
                     title=title,
                     start=start_local,
@@ -445,7 +555,9 @@ async def handle_schedule(
                 if "new_location" in ev_data:
                     updates["location"] = resolve_place_address(ev_data.get("new_location") or "", known_places)
                 if "new_responsible" in ev_data:
-                    updates["responsible_nickname"] = ev_data.get("new_responsible")
+                    updates["responsible_nickname"] = _canonicalize_responsible(
+                        ev_data.get("new_responsible"), responsible_aliases
+                    )
 
                 updated = update_event(event.id, updates)
                 results.append(
