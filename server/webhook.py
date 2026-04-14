@@ -6,7 +6,7 @@ from typing import Annotated
 
 import structlog
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from twilio.request_validator import RequestValidator
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
@@ -65,6 +65,12 @@ def _validate_twilio_signature(request: Request, form_data: dict) -> bool:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "service": "famapp", "version": "0.2.0"}
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    """Redirect root domain traffic to the web dashboard."""
+    return RedirectResponse(url="/app/")
 
 
 # ── WhatsApp webhook ──────────────────────────────────────────────────────────
