@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -11,7 +11,8 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from agents.schedule.calendar_client import AR_TZ, list_upcoming_events
+from agents.schedule.calendar_client import AR_TZ, delete_event, list_upcoming_events, update_event
+from agents.logistics.maps_client import get_travel_time
 from core.config import get_settings
 from core.models import ShoppingItem
 from core.supabase_client import (
@@ -32,6 +33,33 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/app")
 templates = Jinja2Templates(directory="server/templates")
+
+
+def _suggest_departure(start: datetime, location: Optional[str]) -> str:
+    """Suggest departure time using Maps traffic when available, fallback to -30m."""
+    minutes_before = 30
+    if location:
+        try:
+            travel = get_travel_time(destination=location, departure_time=start.astimezone(timezone.utc))
+            minutes_before = max(15, travel.duration_minutes + 10)
+        except Exception:
+            logger.info("maps_fallback_departure", location=location)
+    leave = start - timedelta(minutes=minutes_before)
+    return leave.astimezone(AR_TZ).isoformat()
+
+
+def _infer_user_nickname(user: Any) -> Optional[str]:
+    """Best-effort map from auth email to family nickname."""
+    email = (getattr(user, "email", "") or "").strip().lower()
+    if not email or "@" not in email:
+        return None
+    local = email.split("@", 1)[0]
+    members = get_family_members()
+    for member in members:
+        nick = (member.nickname or "").strip().lower()
+        if nick and (local == nick or local.startswith(f"{nick}.") or local.endswith(f".{nick}")):
+            return nick
+    return None
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -77,6 +105,7 @@ async def index(request: Request):
 async def api_events(user=Depends(require_auth)):
     loop = asyncio.get_event_loop()
     events = await loop.run_in_executor(None, lambda: list_upcoming_events(days=30))
+    user_nickname = _infer_user_nickname(user)
     return [
         {
             "id": e.id,
@@ -85,10 +114,80 @@ async def api_events(user=Depends(require_auth)):
             "end": e.end.astimezone(AR_TZ).isoformat(),
             "location": e.location,
             "responsible_nickname": e.responsible_nickname,
+            "children": e.children,
+            "recurring_event_id": e.recurring_event_id,
             "is_recurring": not e.alerts_enabled,
+            "suggested_departure": _suggest_departure(e.start, e.location)
+            if user_nickname and (e.responsible_nickname or "").strip().lower() == user_nickname
+            else None,
         }
         for e in events
     ]
+
+
+@router.put("/api/events/{event_id}")
+async def api_update_event(
+    event_id: str,
+    payload: Dict[str, Any] = Body(...),
+    user=Depends(require_auth),
+):
+    start_raw = payload.get("start")
+    if not start_raw:
+        raise HTTPException(status_code=400, detail="start es obligatorio")
+
+    try:
+        start_dt = datetime.fromisoformat(start_raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Fecha de inicio inválida") from exc
+
+    end_raw = payload.get("end")
+    if end_raw:
+        try:
+            end_dt = datetime.fromisoformat(end_raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Fecha de fin inválida") from exc
+    else:
+        end_dt = start_dt + timedelta(hours=1)
+
+    target_event_id = event_id
+    if payload.get("apply_to_series") and payload.get("recurring_event_id"):
+        target_event_id = str(payload["recurring_event_id"])
+
+    updated = update_event(
+        target_event_id,
+        {
+            "title": payload.get("title"),
+            "start": start_dt,
+            "end": end_dt,
+            "location": payload.get("location"),
+            "responsible_nickname": payload.get("responsible_nickname"),
+            "children": payload.get("children") or [],
+        },
+    )
+    return {
+        "id": updated.id,
+        "recurring_event_id": updated.recurring_event_id,
+        "title": updated.title,
+        "start": updated.start.astimezone(AR_TZ).isoformat(),
+        "end": updated.end.astimezone(AR_TZ).isoformat(),
+        "location": updated.location,
+        "responsible_nickname": updated.responsible_nickname,
+        "children": updated.children,
+    }
+
+
+@router.delete("/api/events/{event_id}")
+async def api_delete_event(
+    event_id: str,
+    payload: Optional[Dict[str, Any]] = Body(default=None),
+    user=Depends(require_auth),
+):
+    payload = payload or {}
+    target_event_id = event_id
+    if payload.get("apply_to_series") and payload.get("recurring_event_id"):
+        target_event_id = str(payload["recurring_event_id"])
+    delete_event(target_event_id)
+    return {"ok": True}
 
 
 @router.get("/api/shopping")
@@ -140,6 +239,35 @@ async def mark_done(item_id: UUID, user=Depends(require_auth)):
     return {"ok": True}
 
 
+@router.put("/api/shopping/{item_id}")
+async def update_shopping(
+    item_id: UUID,
+    payload: Dict[str, Any] = Body(...),
+    user=Depends(require_auth),
+):
+    client = get_supabase()
+    update_payload = {
+        "name": (payload.get("name") or "").strip(),
+        "quantity": (payload.get("quantity") or "").strip() or None,
+        "unit": (payload.get("unit") or "").strip() or None,
+    }
+    if not update_payload["name"]:
+        raise HTTPException(status_code=400, detail="name es obligatorio")
+    result = client.table("shopping_items").update(update_payload).eq("id", str(item_id)).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Item no encontrado")
+    return {"ok": True}
+
+
+@router.delete("/api/shopping/{item_id}")
+async def delete_shopping(item_id: UUID, user=Depends(require_auth)):
+    client = get_supabase()
+    result = client.table("shopping_items").delete().eq("id", str(item_id)).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Item no encontrado")
+    return {"ok": True}
+
+
 @router.get("/api/family")
 async def api_family(user=Depends(require_auth)):
     members = get_family_members()
@@ -160,6 +288,107 @@ async def api_family(user=Depends(require_auth)):
 async def toggle_minor(member_id: UUID, is_minor: bool = Body(..., embed=True), user=Depends(require_auth)):
     client = get_supabase()
     client.table("family_members").update({"is_minor": is_minor}).eq("id", str(member_id)).execute()
+    return {"ok": True}
+
+
+@router.post("/api/family")
+async def save_family_member(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name es obligatorio")
+
+    nickname = (payload.get("nickname") or name).strip().lower().replace(" ", "_")
+    whatsapp_number = (payload.get("phone") or "").strip()
+    if whatsapp_number and not whatsapp_number.startswith("whatsapp:"):
+        whatsapp_number = f"whatsapp:{whatsapp_number}"
+
+    member_payload = {
+        "name": name,
+        "nickname": nickname,
+        "whatsapp_number": whatsapp_number or "whatsapp:+540000000000",
+        "is_minor": bool(payload.get("is_minor", False)),
+    }
+    if payload.get("id"):
+        member_payload["id"] = payload["id"]
+
+    client = get_supabase()
+    result = client.table("family_members").upsert(member_payload).execute()
+    member = result.data[0]
+    return {
+        "id": member["id"],
+        "name": member["name"],
+        "nickname": member["nickname"],
+        "phone": member["whatsapp_number"].replace("whatsapp:", ""),
+        "is_minor": member["is_minor"],
+    }
+
+
+@router.get("/api/tasks")
+async def api_tasks(user=Depends(require_auth)):
+    client = get_supabase()
+    rows = (
+        client.table("tasks")
+        .select("*")
+        .eq("agent", "family_task")
+        .neq("status", "cancelled")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return [
+        {
+            "id": row["id"],
+            "title": (row.get("payload") or {}).get("title"),
+            "assignee": (row.get("payload") or {}).get("assignee"),
+            "due_date": (row.get("payload") or {}).get("due_date"),
+            "notes": (row.get("payload") or {}).get("notes"),
+            "status": row.get("status", "pending"),
+        }
+        for row in rows.data
+    ]
+
+
+@router.post("/api/tasks")
+async def create_task(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title es obligatorio")
+    client = get_supabase()
+    result = client.table("tasks").insert(
+        {
+            "agent": "family_task",
+            "payload": {
+                "title": title,
+                "assignee": payload.get("assignee"),
+                "due_date": payload.get("due_date"),
+                "notes": payload.get("notes"),
+            },
+            "status": payload.get("status", "pending"),
+        }
+    ).execute()
+    return {"id": result.data[0]["id"]}
+
+
+@router.put("/api/tasks/{task_id}")
+async def update_task(task_id: UUID, payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    client = get_supabase()
+    data: Dict[str, Any] = {}
+    if "status" in payload:
+        data["status"] = payload["status"]
+    if any(k in payload for k in ["title", "assignee", "due_date", "notes"]):
+        data["payload"] = {
+            "title": payload.get("title"),
+            "assignee": payload.get("assignee"),
+            "due_date": payload.get("due_date"),
+            "notes": payload.get("notes"),
+        }
+    client.table("tasks").update(data).eq("id", str(task_id)).eq("agent", "family_task").execute()
+    return {"ok": True}
+
+
+@router.delete("/api/tasks/{task_id}")
+async def delete_task(task_id: UUID, user=Depends(require_auth)):
+    client = get_supabase()
+    client.table("tasks").update({"status": "cancelled"}).eq("id", str(task_id)).eq("agent", "family_task").execute()
     return {"ok": True}
 
 
