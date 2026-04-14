@@ -88,24 +88,30 @@
 
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
           <div class="flex items-center justify-between mb-2">
-            <h3 class="font-medium">Tareas de Julieta</h3>
-            <span class="text-xs text-iosBlue">Hoy</span>
+            <h3 class="font-medium">Rutinas de hoy</h3>
+            <span class="text-xs text-iosBlue" x-text="todaysRoutines().length"></span>
           </div>
-          <template x-for="item in memberTasks('julieta')" :key="item.id">
-            <p class="text-sm py-1">• <span x-text="item.title"></span></p>
+          <template x-for="routine in todaysRoutines()" :key="routine.id">
+            <p class="text-sm py-1">• <span x-text="routine.title"></span></p>
           </template>
-          <p x-show="memberTasks('julieta').length===0" class="text-sm text-slate-400">Sin tareas asignadas.</p>
+          <p x-show="todaysRoutines().length===0" class="text-sm text-slate-400">No hay rutinas activas para hoy.</p>
         </div>
 
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
           <div class="flex items-center justify-between mb-2">
-            <h3 class="font-medium">Tareas de Mauro</h3>
+            <h3 class="font-medium">Tareas por miembro</h3>
             <span class="text-xs text-iosBlue">Hoy</span>
           </div>
-          <template x-for="item in memberTasks('mauro')" :key="item.id">
-            <p class="text-sm py-1">• <span x-text="item.title"></span></p>
+          <template x-for="m in family" :key="`task-${m.id}`">
+            <div class="mb-2">
+              <p class="text-sm font-medium" x-text="m.name"></p>
+              <template x-for="item in memberTasks(m)" :key="`${m.id}-${item.id}-${item.start}`">
+                <p class="text-sm text-slate-600">• <span x-text="item.title"></span></p>
+              </template>
+              <p x-show="memberTasks(m).length===0" class="text-xs text-slate-400">Sin tareas asignadas.</p>
+            </div>
           </template>
-          <p x-show="memberTasks('mauro').length===0" class="text-sm text-slate-400">Sin tareas asignadas.</p>
+          <p x-show="family.length===0" class="text-sm text-slate-400">Cargá miembros para ver tareas asignadas.</p>
         </div>
       </section>
 
@@ -127,6 +133,7 @@
               <span class="text-xs px-2 py-1 rounded-full bg-slate-100" x-text="event.responsible_nickname || 'sin responsable'"></span>
             </div>
             <p class="text-sm text-slate-500">📍 <span x-text="event.location || 'Sin lugar' "></span></p>
+            <p class="text-xs text-slate-500" x-show="(event.children || []).length">👶 <span x-text="event.children.join(', ')"></span></p>
             <div class="grid grid-cols-2 gap-2 text-sm">
               <p>🕒 <span x-text="fmtTime(event.start)"></span></p>
               <p class="text-iosBlue">🚗 Salir <span x-text="suggestDeparture(event.start)"></span></p>
@@ -135,8 +142,27 @@
               <p class="rounded-xl bg-slate-50 px-2 py-1">Llevar: <span x-text="eventDropoff(event)"></span></p>
               <p class="rounded-xl bg-slate-50 px-2 py-1">Buscar: <span x-text="eventPickup(event)"></span></p>
             </div>
+            <button @click="editEvent(event)" class="text-xs text-iosBlue">Editar evento</button>
           </article>
         </template>
+
+        <div x-show="showEventForm" class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
+          <h3 class="font-medium">Editar evento</h3>
+          <input x-model="eventForm.title" placeholder="Título" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.start" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.end" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.location" placeholder="Lugar" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.responsible_nickname" placeholder="Responsable (apodo)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.childrenInput" placeholder="Hijos (ej: Giuseppe,Gaetano)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <label class="flex items-center gap-2 text-sm" x-show="eventForm.recurring_event_id">
+            <input type="checkbox" x-model="eventForm.apply_to_series">
+            Aplicar cambios a toda la serie
+          </label>
+          <div class="flex gap-2">
+            <button @click="saveEvent" class="flex-1 bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Guardar</button>
+            <button @click="cancelEvent" class="flex-1 bg-slate-100 rounded-2xl py-2.5 text-sm">Cancelar</button>
+          </div>
+        </div>
       </section>
 
       <section x-show="view==='shopping'" class="space-y-3">
@@ -158,14 +184,6 @@
             </button>
           </template>
           <p x-show="shoppingPending.length===0" class="text-sm text-slate-400">Nada pendiente.</p>
-        </div>
-
-        <div class="bg-white rounded-3xl p-4 border border-slate-100">
-          <h3 class="font-medium mb-2">Comprados</h3>
-          <template x-for="item in shoppingDone" :key="item.id">
-            <p class="py-2 text-sm text-slate-500 border-b border-slate-100 last:border-b-0">✓ <span x-text="item.name"></span></p>
-          </template>
-          <p x-show="shoppingDone.length===0" class="text-sm text-slate-400">Aún no hay comprados.</p>
         </div>
       </section>
 
@@ -191,6 +209,7 @@
             <p class="mt-2 text-sm text-slate-500">Lugar: <span x-text="routine.place_name || routine.place_alias || '-' "></span></p>
           </article>
         </template>
+        <p x-show="routines.length===0" class="text-sm text-slate-400">Todavía no hay rutinas guardadas.</p>
 
         <div x-show="showRoutineForm" class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
           <input x-model="routineForm.title" placeholder="Giuseppe y Gaetano · Colegio" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
@@ -213,14 +232,33 @@
 
       <section x-show="view==='more'" class="space-y-3">
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
-          <h3 class="font-medium mb-2">Familia</h3>
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-medium">Familia</h3>
+            <button @click="startMember()" class="text-xs text-iosBlue">Agregar niño/familiar</button>
+          </div>
+          <div x-show="showMemberForm" class="space-y-2 mb-3 border-b border-slate-100 pb-3">
+            <input x-model="memberForm.name" placeholder="Nombre" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="memberForm.nickname" placeholder="Apodo (opcional)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="memberForm.phone" placeholder="+54911..." class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" x-model="memberForm.is_minor">
+              Es menor de edad
+            </label>
+            <div class="flex gap-2">
+              <button @click="saveMember" class="flex-1 bg-iosBlue text-white rounded-2xl py-2 text-sm">Guardar</button>
+              <button @click="cancelMember" class="flex-1 bg-slate-100 rounded-2xl py-2 text-sm">Cancelar</button>
+            </div>
+          </div>
           <template x-for="m in family" :key="m.id">
             <div class="py-2 border-b border-slate-100 last:border-b-0 flex justify-between text-sm gap-2">
               <div>
                 <p class="font-medium" x-text="m.name"></p>
-                <p class="text-slate-500" x-text="`${m.role} · ${m.phone || '-'}`"></p>
+                <p class="text-slate-500" x-text="`${m.role} · ${maskPhone(m.phone)}`"></p>
               </div>
-              <button @click="toggleMinor(m)" class="text-xs text-iosBlue" x-text="m.is_minor ? 'Menor' : 'Adulto'"></button>
+              <div class="flex flex-col items-end">
+                <button @click="editMember(m)" class="text-xs text-iosBlue">Editar</button>
+                <button @click="toggleMinor(m)" class="text-xs text-iosBlue" x-text="m.is_minor ? 'Menor' : 'Adulto'"></button>
+              </div>
             </div>
           </template>
         </div>
@@ -237,8 +275,8 @@
           <template x-for="p in places" :key="p.alias">
             <div class="py-2 border-b border-slate-100 last:border-b-0 flex justify-between gap-3">
               <div>
-                <p class="text-sm font-medium" x-text="p.alias"></p>
-                <p class="text-xs text-slate-500" x-text="`${p.name} · ${p.type}`"></p>
+                <p class="text-sm font-medium" x-text="p.name || p.alias"></p>
+                <p class="text-xs text-slate-500" x-text="p.address"></p>
               </div>
               <button @click="deletePlace(p.alias)" class="text-xs text-red-500">Eliminar</button>
             </div>
@@ -287,12 +325,15 @@
         loggingIn: false,
         events: [],
         shoppingPending: [],
-        shoppingDone: [],
         family: [],
         places: [],
         routines: [],
         newShopping: { name: '', quantity: '', unit: '' },
         newPlace: { alias: '', name: '', address: '', type: '' },
+        showMemberForm: false,
+        memberForm: { id: null, name: '', nickname: '', phone: '', is_minor: false },
+        showEventForm: false,
+        eventForm: { id: '', recurring_event_id: '', title: '', start: '', end: '', location: '', responsible_nickname: '', childrenInput: '', apply_to_series: false },
         showRoutineForm: false,
         routineForm: { id: null, title: '', daysInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' },
 
@@ -352,7 +393,6 @@
           ])
           this.events = events || []
           this.shoppingPending = shopping?.pending || []
-          this.shoppingDone = shopping?.done || []
           this.family = family || []
           this.places = places || []
           this.routines = routines || []
@@ -376,6 +416,33 @@
           await this.api(`/family/${member.id}/minor`, { method: 'PUT', body: JSON.stringify({ is_minor: member.is_minor }) })
         },
 
+        startMember() {
+          this.showMemberForm = true
+          this.memberForm = { id: null, name: '', nickname: '', phone: '', is_minor: true }
+        },
+
+        editMember(member) {
+          this.showMemberForm = true
+          this.memberForm = {
+            id: member.id,
+            name: member.name,
+            nickname: member.nickname || '',
+            phone: member.phone || '',
+            is_minor: member.is_minor,
+          }
+        },
+
+        cancelMember() {
+          this.showMemberForm = false
+        },
+
+        async saveMember() {
+          if (!this.memberForm.name.trim()) return
+          await this.api('/family', { method: 'POST', body: JSON.stringify(this.memberForm) })
+          this.showMemberForm = false
+          await this.loadData()
+        },
+
         async savePlace() {
           if (!this.newPlace.alias || !this.newPlace.address) return
           await this.api('/places', { method: 'POST', body: JSON.stringify({ alias: this.newPlace.alias, name: this.newPlace.name || this.newPlace.alias, address: this.newPlace.address, place_type: this.newPlace.type || 'general' }) })
@@ -385,6 +452,42 @@
 
         async deletePlace(alias) {
           await this.api(`/places/${alias}`, { method: 'DELETE' })
+          await this.loadData()
+        },
+
+        editEvent(event) {
+          this.showEventForm = true
+          this.eventForm = {
+            id: event.id,
+            recurring_event_id: event.recurring_event_id || '',
+            title: event.title || '',
+            start: this.toLocalDateTime(event.start),
+            end: this.toLocalDateTime(event.end),
+            location: event.location || '',
+            responsible_nickname: event.responsible_nickname || '',
+            childrenInput: (event.children || []).join(','),
+            apply_to_series: false,
+          }
+        },
+
+        cancelEvent() {
+          this.showEventForm = false
+        },
+
+        async saveEvent() {
+          if (!this.eventForm.id || !this.eventForm.start) return
+          const payload = {
+            title: this.eventForm.title,
+            start: this.toIsoWithTz(this.eventForm.start),
+            end: this.toIsoWithTz(this.eventForm.end),
+            location: this.eventForm.location,
+            responsible_nickname: this.eventForm.responsible_nickname,
+            children: this.eventForm.childrenInput.split(',').map((c) => c.trim()).filter(Boolean),
+            recurring_event_id: this.eventForm.recurring_event_id || null,
+            apply_to_series: this.eventForm.apply_to_series,
+          }
+          await this.api(`/events/${this.eventForm.id}`, { method: 'PUT', body: JSON.stringify(payload) })
+          this.showEventForm = false
           await this.loadData()
         },
 
@@ -434,8 +537,33 @@
           })
         },
 
-        memberTasks(memberName) {
-          return this.todayEvents().filter((e) => (e.responsible_nickname || '').toLowerCase().includes(memberName))
+        memberTasks(member) {
+          const nick = (member.nickname || '').toLowerCase()
+          const memberName = (member.name || '').toLowerCase()
+          return this.todayEvents().filter((e) => {
+            const responsible = (e.responsible_nickname || '').toLowerCase()
+            const children = (e.children || []).map((c) => c.toLowerCase())
+            return responsible === nick || children.includes(memberName) || children.includes(nick)
+          })
+        },
+
+        todaysRoutines() {
+          const shortDay = new Date().toLocaleDateString('es-AR', { weekday: 'short', timeZone: AR_TZ }).toLowerCase().replace('.', '')
+          const dayMap = {
+            lun: ['lun', 'lunes'],
+            mar: ['mar', 'martes'],
+            mié: ['mie', 'mié', 'miércoles', 'miercoles'],
+            jue: ['jue', 'jueves'],
+            vie: ['vie', 'viernes'],
+            sáb: ['sab', 'sáb', 'sábado', 'sabado'],
+            dom: ['dom', 'domingo'],
+          }
+          const keys = dayMap[shortDay] || [shortDay]
+          return this.routines.filter((r) => {
+            if (!r.is_active) return false
+            const values = (r.days || []).map((d) => d.toLowerCase())
+            return values.some((d) => keys.includes(d))
+          })
         },
 
         nextDepartureLabel() {
@@ -444,6 +572,10 @@
         },
 
         suggestDeparture(startIso) {
+          const event = this.events.find((e) => e.start === startIso)
+          if (event?.suggested_departure) {
+            return this.fmtTime(event.suggested_departure)
+          }
           const start = new Date(startIso)
           const leave = new Date(start.getTime() - 30 * 60 * 1000)
           return leave.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: AR_TZ })
@@ -471,6 +603,29 @@
 
         fmtAgendaDate(iso) {
           return new Date(iso).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short', timeZone: AR_TZ })
+        },
+
+        toLocalDateTime(iso) {
+          if (!iso) return ''
+          const d = new Date(iso)
+          const y = d.getFullYear()
+          const m = `${d.getMonth() + 1}`.padStart(2, '0')
+          const day = `${d.getDate()}`.padStart(2, '0')
+          const h = `${d.getHours()}`.padStart(2, '0')
+          const min = `${d.getMinutes()}`.padStart(2, '0')
+          return `${y}-${m}-${day}T${h}:${min}`
+        },
+
+        toIsoWithTz(localValue) {
+          if (!localValue) return null
+          return new Date(localValue).toISOString()
+        },
+
+        maskPhone(phone) {
+          if (!phone) return '-'
+          const raw = `${phone}`.replace(/\s+/g, '')
+          if (raw.length <= 4) return '••••'
+          return `${raw.slice(0, 3)}••••${raw.slice(-2)}`
         },
 
         headerTitle() {
