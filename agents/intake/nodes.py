@@ -148,7 +148,35 @@ def _clean_shopping_item_name(name: str) -> str:
     return cleaned.strip(" .,!?:;")
 
 
-def _extract_shopping_items(entities: Dict[str, Any], raw_text: str) -> List[Dict[str, str]]:
+def _infer_shopping_action(entities: Dict[str, Any], raw_text: str) -> str:
+    action = (entities.get("action", "") if isinstance(entities, dict) else "").strip().lower()
+    if action in {"add", "list", "mark_done"}:
+        return action
+
+    normalized = (raw_text or "").strip().lower()
+    if not normalized:
+        return "list"
+
+    is_question = "?" in normalized or normalized.startswith(("que ", "qué ", "cual ", "cuál "))
+    list_patterns = (
+        "lista de compras",
+        "que hay",
+        "qué hay",
+        "que tengo que comprar",
+        "qué tengo que comprar",
+        "que falta comprar",
+        "qué falta comprar",
+    )
+    if is_question and any(p in normalized for p in list_patterns):
+        return "list"
+
+    if any(k in normalized for k in ("tacha", "tachá", "ya compre", "ya compré", "comprado", "marca ")):
+        return "mark_done"
+
+    return "add"
+
+
+def _extract_shopping_items(entities: Dict[str, Any], raw_text: str, action: str) -> List[Dict[str, str]]:
     items: List[Dict[str, str]] = []
     raw_items = entities.get("items", []) if isinstance(entities, dict) else []
     for item in raw_items:
@@ -174,6 +202,8 @@ def _extract_shopping_items(entities: Dict[str, Any], raw_text: str) -> List[Dic
     text = (raw_text or "").strip()
     if not text:
         return []
+    if action != "add":
+        return []
     normalized = text.lower()
     normalized = re.sub(r"^(comprar|compra|agregar|agrega|agregá|anota|anotá)\s+", "", normalized)
     parts = re.split(r",| y | e |;", normalized)
@@ -193,8 +223,8 @@ async def handle_shopping(state: IntakeState) -> Dict[str, Any]:
     from agents.intake.tools import add_item_to_shopping_list, list_shopping_items, mark_items_done
 
     entities = state.get("entities", {})
-    action = entities.get("action", "")
-    items = _extract_shopping_items(entities, state.get("raw_text", ""))
+    action = _infer_shopping_action(entities, state.get("raw_text", ""))
+    items = _extract_shopping_items(entities, state.get("raw_text", ""), action)
     logger.info(
         "intake_shopping_handler_input",
         raw_text=state.get("raw_text", ""),

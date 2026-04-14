@@ -84,6 +84,25 @@ def test_handle_shopping_parses_single_word_and_dedupes():
     assert add_mock.await_count == 1
 
 
+def test_handle_shopping_question_lists_instead_of_adding_phrase():
+    from agents.intake.nodes import handle_shopping
+
+    state = make_state(
+        raw_text="que hay en la lista de compras?",
+        intent=IntentType.SHOPPING,
+        entities={},
+    )
+
+    with patch("agents.intake.tools.get_pending_shopping_items", new=AsyncMock(return_value=[])) as list_mock:
+        with patch("agents.intake.tools.add_shopping_item", new=AsyncMock()) as add_mock:
+            result = asyncio.run(handle_shopping(state))
+
+    assert result["route_to"] == "direct"
+    assert "lista de compras está vacía" in result["response_text"].lower()
+    assert list_mock.await_count == 1
+    assert add_mock.await_count == 0
+
+
 def test_incoming_whatsapp_sender_phone_strips_prefix():
     from core.models import IncomingWhatsAppMessage
 
