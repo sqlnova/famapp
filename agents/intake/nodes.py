@@ -170,7 +170,25 @@ def _infer_shopping_action(entities: Dict[str, Any], raw_text: str) -> str:
     if is_question and any(p in normalized for p in list_patterns):
         return "list"
 
-    if any(k in normalized for k in ("tacha", "tachá", "ya compre", "ya compré", "comprado", "marca ", "eliminar ")):
+    if any(
+        k in normalized
+        for k in (
+            "tacha",
+            "tachá",
+            "ya compre",
+            "ya compré",
+            "comprado",
+            "marca ",
+            "eliminar ",
+            "elimina ",
+            "tachar todo",
+            "elimina todo",
+            "todo",
+            "todos",
+            "compra realizada",
+            "compras realizadas",
+        )
+    ):
         return "mark_done"
 
     return "add"
@@ -224,11 +242,15 @@ def _is_bulk_mark_done_request(raw_text: str) -> bool:
         "tachar todo",
         "tacha todo",
         "tachá todo",
+        "elimina todo",
         "eliminar todo",
         "borrar todo",
         "marcar todo",
         "todo comprado",
+        "compra realizada",
         "compras realizadas",
+        "todos",
+        "todo",
     )
     return any(p in normalized for p in bulk_patterns)
 

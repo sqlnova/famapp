@@ -46,6 +46,13 @@ def test_determine_route_unknown_shopping_fallback():
     assert result == "handle_shopping"
 
 
+def test_determine_route_todos_falls_back_to_shopping():
+    from agents.intake.nodes import determine_route
+
+    result = asyncio.run(determine_route(make_state(intent=IntentType.UNKNOWN, raw_text="todos", response_text=None)))
+    assert result == "handle_shopping"
+
+
 def test_build_response_unknown_fallback():
     from agents.intake.nodes import build_response
 
@@ -113,6 +120,23 @@ def test_handle_shopping_bulk_mark_done_marks_all_pending():
     )
 
     with patch("agents.intake.tools.mark_all_pending_shopping_items_done", new=AsyncMock(return_value=4)) as mark_all_mock:
+        result = asyncio.run(handle_shopping(state))
+
+    assert result["route_to"] == "direct"
+    assert "taché todos" in result["response_text"].lower()
+    assert mark_all_mock.await_count == 1
+
+
+def test_handle_shopping_bulk_mark_done_handles_compra_realizada_text():
+    from agents.intake.nodes import handle_shopping
+
+    state = make_state(
+        raw_text="compra realizada, elimina todo",
+        intent=IntentType.SHOPPING,
+        entities={},
+    )
+
+    with patch("agents.intake.tools.mark_all_pending_shopping_items_done", new=AsyncMock(return_value=3)) as mark_all_mock:
         result = asyncio.run(handle_shopping(state))
 
     assert result["route_to"] == "direct"
