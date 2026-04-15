@@ -44,6 +44,11 @@ router = APIRouter(prefix="/app")
 templates = Jinja2Templates(directory="server/templates")
 
 
+def _allow_local_fallback() -> bool:
+    """Allow local JSON fallback only outside production."""
+    return not get_settings().is_production
+
+
 def _suggest_departure(start: datetime, location: Optional[str]) -> str:
     """Suggest departure time using Maps traffic when available, fallback to -30m."""
     minutes_before = 30
@@ -448,13 +453,16 @@ async def api_places(user=Depends(require_auth)):
     try:
         places = get_all_known_places()
         rows = [{"alias": p.alias, "name": p.name, "address": p.address, "type": p.place_type or "general"} for p in places]
-    except Exception:
-        logger.warning("places_db_read_failed")
+    except Exception as error:
+        logger.warning("places_db_read_failed", error=str(error))
+        if not _allow_local_fallback():
+            raise HTTPException(status_code=503, detail="No se pudo leer lugares desde la base de datos.")
 
-    local_rows = local_list_places()
-    if local_rows:
-        seen = {(r["alias"] or "").lower() for r in rows}
-        rows.extend([r for r in local_rows if (r.get("alias") or "").lower() not in seen])
+    if _allow_local_fallback():
+        local_rows = local_list_places()
+        if local_rows:
+            seen = {(r["alias"] or "").lower() for r in rows}
+            rows.extend([r for r in local_rows if (r.get("alias") or "").lower() not in seen])
     if rows:
         return rows
 
@@ -493,9 +501,12 @@ async def save_place(
     try:
         place = upsert_known_place(alias, name, address, place_type)
         return {"alias": place.alias, "name": place.name, "address": place.address, "type": place.place_type}
-    except Exception:
-        logger.warning("places_db_write_failed_fallback_local")
-        return local_save_place({"alias": alias, "name": name, "address": address, "type": place_type})
+    except Exception as error:
+        logger.warning("places_db_write_failed", error=str(error))
+        if _allow_local_fallback():
+            logger.warning("places_db_write_fallback_local_enabled")
+            return local_save_place({"alias": alias, "name": name, "address": address, "type": place_type})
+        raise HTTPException(status_code=503, detail="No se pudo guardar el lugar en la base de datos.")
 
 
 @router.delete("/api/places/{alias}")
@@ -517,8 +528,10 @@ async def api_routines(user=Depends(require_auth)):
     routines = []
     try:
         routines = list_family_routines()
-    except Exception:
-        logger.warning("routines_db_read_failed")
+    except Exception as error:
+        logger.warning("routines_db_read_failed", error=str(error))
+        if not _allow_local_fallback():
+            raise HTTPException(status_code=503, detail="No se pudo leer rutinas desde la base de datos.")
     rows = [
         {
             "id": str(r.id),
@@ -535,10 +548,11 @@ async def api_routines(user=Depends(require_auth)):
         }
         for r in routines
     ]
-    local_rows = local_list_routines()
-    if local_rows:
-        seen = {str(r["id"]) for r in rows}
-        rows.extend([r for r in local_rows if str(r.get("id")) not in seen])
+    if _allow_local_fallback():
+        local_rows = local_list_routines()
+        if local_rows:
+            seen = {str(r["id"]) for r in rows}
+            rows.extend([r for r in local_rows if str(r.get("id")) not in seen])
     return rows
 
 
@@ -606,8 +620,12 @@ async def api_save_routine(payload: Dict[str, Any] = Body(...), user=Depends(req
                 "is_active": routine.is_active,
             }
         except Exception as second_error:
-            logger.warning("routine_upsert_fallback_failed_local_save", error=str(second_error))
-            routine_obj = local_save_routine(clean_payload)
+            logger.warning("routine_upsert_fallback_failed", error=str(second_error))
+            if _allow_local_fallback():
+                logger.warning("routine_upsert_local_fallback_enabled")
+                routine_obj = local_save_routine(clean_payload)
+            else:
+                raise HTTPException(status_code=503, detail="No se pudo guardar la rutina en la base de datos.")
 
     if is_new:
         try:

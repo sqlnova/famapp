@@ -6,7 +6,7 @@ from typing import Annotated
 
 import structlog
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from twilio.request_validator import RequestValidator
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -56,11 +56,15 @@ app.include_router(web_router)
 async def enforce_https(request: Request, call_next):
     """Enforce HTTPS in production environments."""
     s = get_settings()
-    if s.is_production and request.url.scheme != "https":
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").lower()
+    is_https = request.url.scheme == "https" or "https" in forwarded_proto.split(",")
+    host = request.headers.get("host", "")
+    is_local = host.startswith("localhost") or host.startswith("127.0.0.1")
+    if s.is_production and not is_https and not is_local:
         https_url = str(request.url).replace("http://", "https://", 1)
         if request.method in {"GET", "HEAD"}:
             return RedirectResponse(url=https_url, status_code=307)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="HTTPS required")
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": "HTTPS required"})
     return await call_next(request)
 
 
