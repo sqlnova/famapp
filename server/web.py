@@ -332,10 +332,11 @@ async def index(request: Request):
 # ── API ───────────────────────────────────────────────────────────────────────
 
 @router.get("/api/events")
-async def api_events(user=Depends(require_auth)):
+async def api_events(user=Depends(require_auth), x_user_nickname: Optional[str] = Header(None)):
     loop = asyncio.get_event_loop()
     events = await loop.run_in_executor(None, lambda: list_upcoming_events(days=30))
-    user_nickname = _infer_user_nickname(user)
+    # Use nickname from header if provided, otherwise try to infer from email
+    user_nickname = (x_user_nickname or "").strip().lower() if x_user_nickname else _infer_user_nickname(user)
     return [
         {
             "id": e.id,
