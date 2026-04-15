@@ -436,6 +436,7 @@ async def handle_schedule(
                 date_fmt = start_local.strftime("%-d/%-m a las %H:%M")
                 resp_note = f" ({responsible})" if responsible else ""
                 created_msgs.append(f"• *{created.title}* — {date_fmt}{resp_note}")
+                _notify_responsible(responsible, sender, created.title, date_fmt, location)
 
             header = "✅ Evento creado:" if len(created_msgs) == 1 else f"✅ {len(created_msgs)} eventos creados:"
             return header + "\n" + "\n".join(created_msgs)
@@ -495,6 +496,8 @@ async def handle_schedule(
                 time_range = f"{start_time}–{end_time}" if end_time else start_time
                 resp_note = f" ({responsible})" if responsible else ""
                 created_msgs.append(f"• *{title}* — {days_es}, {time_range}{resp_note}")
+                rec_date_fmt = f"{days_es}, {time_range}"
+                _notify_responsible(responsible, sender, title, rec_date_fmt, rec_location, recurring=True)
 
             if not created_msgs:
                 return "No pude entender los días. ¿Me podés decir cuándo se repite?"
@@ -605,6 +608,44 @@ async def handle_schedule(
     except Exception:
         logger.exception("schedule_agent_error")
         return "No pude acceder al calendario ahora. Revisá que la cuenta de servicio tenga acceso."
+
+
+def _notify_responsible(
+    responsible: Optional[str],
+    sender: str,
+    title: str,
+    date_fmt: str,
+    location: Optional[str],
+    recurring: bool = False,
+) -> None:
+    """Send a WhatsApp to the responsible person when a new event is created for them.
+
+    Skips if the responsible person is the same as the sender (they already get the
+    schedule confirmation) or if the member has no phone number registered.
+    """
+    if not responsible:
+        return
+    try:
+        from core.supabase_client import get_family_member_by_nickname
+        from core.whatsapp import send_whatsapp_message
+
+        member = get_family_member_by_nickname(responsible)
+        if not member or not member.whatsapp_number:
+            return
+
+        def _bare(num: str) -> str:
+            return (num or "").replace("whatsapp:", "").replace(" ", "")
+
+        if _bare(sender) == _bare(member.whatsapp_number):
+            return  # sender already gets the confirmation reply
+
+        header = "📅 Tenés un horario recurrente agendado:" if recurring else "📅 Tenés un evento agendado:"
+        loc_note = f"\n📍 {location}" if location else ""
+        notif = f"{header}\n• *{title}* — {date_fmt}{loc_note}"
+        send_whatsapp_message(member.whatsapp_number, notif)
+        logger.info("responsible_notified", responsible=responsible, title=title)
+    except Exception:
+        logger.warning("responsible_notification_failed", responsible=responsible)
 
 
 def _normalize_text(text: str) -> str:
