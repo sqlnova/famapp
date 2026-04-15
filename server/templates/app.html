@@ -1209,8 +1209,16 @@
 
         nextDepartureLabel() {
           const now = new Date()
+          const events = this.filteredAgenda()
+          console.log('nextDepartureLabel debug:', {
+            totalEvents: this.events.length,
+            filteredEvents: events.length,
+            events: events.map(e => ({ title: e.title, start: e.start, location: e.location, suggested_departure: e.suggested_departure, responsible: e.responsible_nickname, myNickname: this.myNickname() }))
+          })
+
           // Only show departure time if user is responsible for an event (has suggested_departure)
-          const event = this.filteredAgenda().find((e) => new Date(e.start) > now && e.suggested_departure)
+          const event = events.find((e) => new Date(e.start) > now && e.suggested_departure)
+          console.log('nextDepartureLabel: found event?', !!event, event?.title)
           return event ? this.fmtTime(event.suggested_departure) : 'Sin salidas asignadas'
         },
 
