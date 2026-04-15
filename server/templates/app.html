@@ -995,19 +995,24 @@
         todaysRoutineActions() {
           const mine = this.myNickname()
           const actions = []
+          // Only show routines where the current user is responsible
+          if (!mine) return actions  // No user nickname, can't filter
+
           this.todaysRoutines().forEach((r) => {
             const children = (r.children || []).join(' y ') || 'los chicos'
             const place = r.place_name || r.place_alias || 'actividad'
             const outResp = (r.outbound_responsible || '').toLowerCase()
             const retResp = (r.return_responsible || '').toLowerCase()
-            if (!mine || mine === outResp) {
+
+            // Only add if user is the responsible for this action
+            if (mine === outResp && r.outbound_time) {
               actions.push({
                 key: `${r.id}-out`,
                 time: r.outbound_time || '--:--',
                 text: `Llevar a ${children} a ${place}`,
               })
             }
-            if (!mine || mine === retResp) {
+            if (mine === retResp && r.return_time) {
               actions.push({
                 key: `${r.id}-ret`,
                 time: r.return_time || '--:--',
@@ -1019,8 +1024,18 @@
         },
 
         nextDepartureLabel() {
-          const event = this.filteredAgenda().find((e) => new Date(e.start) > new Date() && e.suggested_departure)
-          return event ? this.fmtTime(event.suggested_departure) : 'Sin salidas asignadas'
+          const now = new Date()
+          // First, look for an event with a calculated suggested_departure (when user is responsible)
+          const event = this.filteredAgenda().find((e) => new Date(e.start) > now && e.suggested_departure)
+          if (event) return this.fmtTime(event.suggested_departure)
+
+          // Fallback: if no specific departure time, show approximate time 30 min before first event
+          const nextEvent = this.filteredAgenda().find((e) => new Date(e.start) > now)
+          if (nextEvent) {
+            const approxDeparture = new Date(new Date(nextEvent.start).getTime() - 30 * 60 * 1000)
+            return this.fmtTime(approxDeparture.toISOString()) + ' (aprox.)'
+          }
+          return 'Sin salidas asignadas'
         },
 
         suggestDeparture(startIso) {
