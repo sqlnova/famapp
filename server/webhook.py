@@ -7,6 +7,7 @@ from typing import Annotated
 import structlog
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from twilio.request_validator import RequestValidator
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
@@ -46,6 +47,7 @@ app = FastAPI(title="FamApp", version="0.3.0", lifespan=lifespan)
 # Trust Railway's reverse proxy headers so request.url uses https://
 # This is required for Twilio signature validation to work behind a proxy
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+app.mount("/app/static", StaticFiles(directory="server/static"), name="static")
 app.include_router(web_router)
 
 

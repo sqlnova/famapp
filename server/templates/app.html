@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="FamApp">
+  <meta name="theme-color" content="#f4f5f7">
+  <link rel="icon" type="image/png" sizes="512x512" href="/app/static/icons/famapp-logo.png">
+  <link rel="icon" type="image/svg+xml" href="/app/static/icons/famapp-logo.svg">
+  <link rel="shortcut icon" href="/app/static/icons/famapp-logo.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="/app/static/icons/famapp-logo.png">
+  <link rel="manifest" href="/app/static/manifest.webmanifest">
   <title>FamApp · Privada</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -89,12 +96,12 @@
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
           <div class="flex items-center justify-between mb-2">
             <h3 class="font-medium">Rutinas de hoy</h3>
-            <span class="text-xs text-iosBlue" x-text="todaysRoutines().length"></span>
+            <span class="text-xs text-iosBlue" x-text="todaysRoutineActions().length"></span>
           </div>
-          <template x-for="routine in todaysRoutines()" :key="routine.id">
-            <p class="text-sm py-1">• <span x-text="routine.title"></span></p>
+          <template x-for="action in todaysRoutineActions()" :key="action.key">
+            <p class="text-sm py-1">• <span class="font-medium" x-text="action.time"></span> — <span x-text="action.text"></span></p>
           </template>
-          <p x-show="todaysRoutines().length===0" class="text-sm text-slate-400">No hay rutinas activas para hoy.</p>
+          <p x-show="todaysRoutineActions().length===0" class="text-sm text-slate-400">No hay rutinas activas para hoy.</p>
         </div>
 
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
@@ -310,6 +317,7 @@
               <p>Ida: <span x-text="routine.outbound_time || '-' "></span> · <span x-text="routine.outbound_responsible || '-' "></span></p>
               <p>Vuelta: <span x-text="routine.return_time || '-' "></span> · <span x-text="routine.return_responsible || '-' "></span></p>
             </div>
+            <p class="mt-2 text-sm text-slate-500">Hijos: <span x-text="(routine.children || []).join(', ') || '-' "></span></p>
             <p class="mt-2 text-sm text-slate-500">Lugar: <span x-text="routine.place_name || routine.place_alias || '-' "></span></p>
           </article>
         </template>
@@ -318,18 +326,36 @@
         <div x-show="showRoutineForm" class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
           <input x-model="routineForm.title" placeholder="Giuseppe y Gaetano · Colegio" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <input x-model="routineForm.daysInput" placeholder="Lun,Mar,Mie,Jue,Vie" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="routineForm.childrenInput" placeholder="Hijos (ej: Giuseppe,Gaetano)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <div class="grid grid-cols-2 gap-2">
             <input x-model="routineForm.outbound_time" placeholder="07:20" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
             <input x-model="routineForm.return_time" placeholder="16:10" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
           </div>
           <div class="grid grid-cols-2 gap-2">
-            <input x-model="routineForm.outbound_responsible" placeholder="Julieta" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
-            <input x-model="routineForm.return_responsible" placeholder="Mauro" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="routineForm.outbound_responsible" placeholder="Responsable de llevar (Mauro)" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="routineForm.return_responsible" placeholder="Responsable de buscar (Julieta)" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
           </div>
           <input x-model="routineForm.place_name" placeholder="Colegio" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <div class="flex gap-2">
             <button @click="saveRoutine" class="flex-1 bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Guardar</button>
             <button @click="cancelRoutine" class="flex-1 bg-slate-100 rounded-2xl py-2.5 text-sm">Cancelar</button>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-medium">Lugares guardados</h4>
+            <span class="text-xs text-iosBlue" x-text="places.length"></span>
+          </div>
+          <template x-for="p in places" :key="p.alias">
+            <p class="text-sm text-slate-600">• <span class="font-medium" x-text="p.name || p.alias"></span> — <span x-text="p.address"></span></p>
+          </template>
+          <p x-show="places.length===0" class="text-sm text-slate-400">Todavía no hay lugares guardados.</p>
+          <div class="pt-2 border-t border-slate-100 grid grid-cols-1 gap-2">
+            <input x-model="newPlace.alias" placeholder="Alias (ej: colegio)" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newPlace.name" placeholder="Nombre (ej: Colegio Don Bosco)" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newPlace.address" placeholder="Dirección completa" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <button @click="savePlace" class="bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Guardar lugar</button>
           </div>
         </div>
       </section>
@@ -449,7 +475,7 @@
         showEventForm: false,
         eventForm: { id: '', recurring_event_id: '', title: '', start: '', end: '', location: '', responsible_nickname: '', childrenInput: '', apply_to_series: false },
         showRoutineForm: false,
-        routineForm: { id: null, title: '', daysInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' },
+        routineForm: { id: null, title: '', daysInput: '', childrenInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' },
 
         async init() {
           this.selectedAgendaDate = this.toDateKey(new Date())
@@ -672,7 +698,7 @@
 
         startRoutine() {
           this.showRoutineForm = true
-          this.routineForm = { id: null, title: '', daysInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' }
+          this.routineForm = { id: null, title: '', daysInput: '', childrenInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' }
         },
 
         editRoutine(routine) {
@@ -680,6 +706,7 @@
           this.routineForm = {
             ...routine,
             daysInput: (routine.days || []).join(','),
+            childrenInput: (routine.children || []).join(','),
           }
         },
 
@@ -689,9 +716,15 @@
 
         async saveRoutine() {
           const days = this.normalizeRoutineDays(this.routineForm.daysInput)
+          const children = this.routineForm.childrenInput.split(',').map((c) => c.trim()).filter(Boolean)
+          if (!this.routineForm.title.trim() || days.length === 0 || !this.routineForm.outbound_time || !this.routineForm.return_time || !this.routineForm.outbound_responsible || !this.routineForm.return_responsible || !this.routineForm.place_name || children.length === 0) {
+            window.alert('Completá todos los campos: título, días, horas, responsables, hijos y lugar.')
+            return
+          }
           const payload = {
             ...this.routineForm,
             days,
+            children,
             is_active: true,
           }
           const saved = await this.api('/routines', { method: 'POST', body: JSON.stringify(payload) })
@@ -926,6 +959,43 @@
             const values = (r.days || []).map((d) => this.normalizeDayToken(d))
             return values.includes(key)
           })
+        },
+
+        myNickname() {
+          const email = (this.user?.email || '').toLowerCase()
+          if (!email.includes('@')) return ''
+          const local = email.split('@')[0]
+          const match = this.family.find((m) => {
+            const nick = (m.nickname || '').toLowerCase()
+            return nick && (local === nick || local.startsWith(`${nick}.`) || local.endsWith(`.${nick}`))
+          })
+          return (match?.nickname || '').toLowerCase()
+        },
+
+        todaysRoutineActions() {
+          const mine = this.myNickname()
+          const actions = []
+          this.todaysRoutines().forEach((r) => {
+            const children = (r.children || []).join(' y ') || 'los chicos'
+            const place = r.place_name || r.place_alias || 'actividad'
+            const outResp = (r.outbound_responsible || '').toLowerCase()
+            const retResp = (r.return_responsible || '').toLowerCase()
+            if (!mine || mine === outResp) {
+              actions.push({
+                key: `${r.id}-out`,
+                time: r.outbound_time || '--:--',
+                text: `Llevar a ${children} a ${place}`,
+              })
+            }
+            if (!mine || mine === retResp) {
+              actions.push({
+                key: `${r.id}-ret`,
+                time: r.return_time || '--:--',
+                text: `Buscar a ${children} de ${place}`,
+              })
+            }
+          })
+          return actions.sort((a, b) => (a.time || '').localeCompare(b.time || ''))
         },
 
         nextDepartureLabel() {
