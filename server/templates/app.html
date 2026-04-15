@@ -63,6 +63,24 @@
     </div>
   </div>
 
+  <!-- Nickname selector modal -->
+  <div x-show="showNicknameSelector" class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4">
+      <h2 class="text-xl font-semibold">¿Quién eres?</h2>
+      <p class="text-sm text-slate-600">Selecciona tu apodo para personalizar tu experiencia</p>
+      <div class="space-y-2">
+        <template x-for="member in family" :key="member.id">
+          <button @click="selectUserNickname(member.nickname)"
+            class="w-full text-left p-3 rounded-xl border-2 border-slate-200 hover:border-iosBlue hover:bg-iosBlue/5 transition"
+            :class="userNickname === member.nickname ? 'border-iosBlue bg-iosBlue/10' : ''">
+            <p class="font-medium" x-text="member.name"></p>
+            <p class="text-xs text-slate-500" x-text="`(${member.nickname})`"></p>
+          </button>
+        </template>
+      </div>
+    </div>
+  </div>
+
   <div x-show="!loading && user" class="max-w-3xl mx-auto pb-28">
     <header class="sticky top-0 z-20 bg-appBg/90 backdrop-blur px-4 pt-5 pb-3">
       <div class="bg-white rounded-3xl px-5 py-4 border border-slate-100 shadow-sm flex items-center justify-between">
@@ -539,9 +557,13 @@
         showTaskSuggestions: false,
         suggestedTasks: [],
         selectedSuggestions: [],
+        userNickname: '',
+        showNicknameSelector: false,
 
         async init() {
           this.selectedAgendaDate = this.toDateKey(new Date())
+          // Load saved nickname from localStorage
+          this.userNickname = localStorage.getItem('famapp_user_nickname') || ''
           const { data: { session } } = await sb.auth.getSession()
           if (session) {
             this.user = session.user
@@ -569,6 +591,8 @@
           await sb.auth.signOut()
           this.user = null
           this.token = null
+          this.userNickname = ''
+          localStorage.removeItem('famapp_user_nickname')
         },
 
         async api(path, options = {}) {
@@ -608,6 +632,18 @@
           this.places = Array.isArray(places) ? places : []
           this.routines = Array.isArray(routines) ? routines : []
           this.tasks = Array.isArray(tasks) ? tasks : []
+
+          // Show nickname selector if no nickname is saved
+          if (this.user && !this.userNickname) {
+            this.showNicknameSelector = true
+          }
+        },
+
+        selectUserNickname(nickname) {
+          this.userNickname = nickname
+          localStorage.setItem('famapp_user_nickname', nickname)
+          this.showNicknameSelector = false
+          console.log('User nickname set to:', nickname)
         },
 
         async addShopping() {
@@ -1118,30 +1154,8 @@
         },
 
         myNickname() {
-          const email = (this.user?.email || '').toLowerCase()
-          if (!email.includes('@')) return ''
-          const local = email.split('@')[0]
-
-          // Normalize function to remove accents for comparison
-          const normalize = (str) => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-          const normalizedLocal = normalize(local)
-
-          const match = this.family.find((m) => {
-            const nick = (m.nickname || '').toLowerCase()
-            const normalizedNick = normalize(nick)
-            // Try exact match, or match with normalized versions (removing accents)
-            return nick && (
-              local === nick ||
-              normalizedLocal === normalizedNick ||
-              local.startsWith(`${nick}.`) ||
-              normalizedLocal.startsWith(`${normalizedNick}.`) ||
-              local.endsWith(`.${nick}`) ||
-              normalizedLocal.endsWith(`.${normalizedNick}`)
-            )
-          })
-          const result = (match?.nickname || '').toLowerCase()
-          console.log('myNickname debug:', { email, local, familyNicknames: this.family.map(m => m.nickname), result })
-          return result
+          // Use the nickname selected by the user
+          return (this.userNickname || '').toLowerCase()
         },
 
         todaysRoutineActions() {
@@ -1155,44 +1169,22 @@
             const outResp = (r.outbound_responsible || '').toLowerCase()
             const retResp = (r.return_responsible || '').toLowerCase()
 
-            console.log('routine debug:', { title: r.title, outResp, retResp, mine, matches: { out: mine === outResp, ret: mine === retResp } })
-
-            // If user has a valid nickname, only show assigned routines
-            // Otherwise, show all routines (fallback when nickname can't be determined)
-            if (mine) {
-              if (mine === outResp && r.outbound_time) {
-                actions.push({
-                  key: `${r.id}-out`,
-                  time: r.outbound_time || '--:--',
-                  text: `Llevar a ${children} a ${place}`,
-                })
-              }
-              if (mine === retResp && r.return_time) {
-                actions.push({
-                  key: `${r.id}-ret`,
-                  time: r.return_time || '--:--',
-                  text: `Buscar a ${children} de ${place}`,
-                })
-              }
-            } else {
-              // Fallback: show all routines if we can't determine user nickname
-              if (r.outbound_time) {
-                actions.push({
-                  key: `${r.id}-out`,
-                  time: r.outbound_time || '--:--',
-                  text: `Llevar a ${children} a ${place}`,
-                })
-              }
-              if (r.return_time) {
-                actions.push({
-                  key: `${r.id}-ret`,
-                  time: r.return_time || '--:--',
-                  text: `Buscar a ${children} de ${place}`,
-                })
-              }
+            // Only show routines assigned to the current user
+            if (mine === outResp && r.outbound_time) {
+              actions.push({
+                key: `${r.id}-out`,
+                time: r.outbound_time || '--:--',
+                text: `Llevar a ${children} a ${place}`,
+              })
+            }
+            if (mine === retResp && r.return_time) {
+              actions.push({
+                key: `${r.id}-ret`,
+                time: r.return_time || '--:--',
+                text: `Buscar a ${children} de ${place}`,
+              })
             }
           })
-          console.log('todaysRoutineActions:', { mine, totalRoutines: routines.length, actionsCount: actions.length })
           return actions.sort((a, b) => (a.time || '').localeCompare(b.time || ''))
         },
 
