@@ -790,12 +790,17 @@
             apply_to_series: this.eventForm.apply_to_series,
           }
 
+          console.log('saveEvent: saving with payload', payload)
+
           // Create or update
+          let result
           if (this.eventForm.id) {
-            await this.api(`/events/${this.eventForm.id}`, { method: 'PUT', body: JSON.stringify(payload) })
+            result = await this.api(`/events/${this.eventForm.id}`, { method: 'PUT', body: JSON.stringify(payload) })
           } else {
-            await this.api(`/events`, { method: 'POST', body: JSON.stringify(payload) })
+            result = await this.api(`/events`, { method: 'POST', body: JSON.stringify(payload) })
           }
+
+          console.log('saveEvent: API response', result)
 
           this.showEventForm = false
 
@@ -804,16 +809,22 @@
 
           // If no suggestions, reload and finish
           if (this.suggestedTasks.length === 0) {
+            console.log('saveEvent: no suggestions, loading data')
             await this.loadData()
+          } else {
+            console.log('saveEvent: showing suggestions modal')
           }
           // Otherwise, the modal stays open for user to select tasks
         },
 
         async suggestTasksForEvent(eventPayload) {
+          console.log('suggestTasksForEvent: requesting suggestions for', eventPayload.title)
           const suggestions = await this.api('/tasks/suggestions', {
             method: 'POST',
             body: JSON.stringify(eventPayload)
           })
+
+          console.log('suggestTasksForEvent: received suggestions', suggestions)
 
           if (suggestions && suggestions.suggestions && suggestions.suggestions.length > 0) {
             this.suggestedTasks = suggestions.suggestions.map((s, idx) => ({
@@ -823,17 +834,23 @@
             }))
             this.selectedSuggestions = []
             this.showTaskSuggestions = true
+            console.log('suggestTasksForEvent: showing modal with', this.suggestedTasks.length, 'suggestions')
+          } else {
+            console.log('suggestTasksForEvent: no suggestions received')
           }
         },
 
         toggleSuggestion(idx) {
           this.suggestedTasks[idx].selected = !this.suggestedTasks[idx].selected
+          console.log('toggleSuggestion:', idx, 'now:', this.suggestedTasks[idx].selected)
         },
 
         async createSuggestedTasks() {
           const tasksToCreate = this.suggestedTasks.filter(t => t.selected)
+          console.log('createSuggestedTasks: creating', tasksToCreate.length, 'tasks')
 
           for (const task of tasksToCreate) {
+            console.log('createSuggestedTasks: creating task', task.title)
             await this.api('/tasks', {
               method: 'POST',
               body: JSON.stringify({
@@ -845,6 +862,7 @@
             })
           }
 
+          console.log('createSuggestedTasks: finished, closing modal and reloading')
           this.showTaskSuggestions = false
           this.suggestedTasks = []
           this.selectedSuggestions = []
