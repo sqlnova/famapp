@@ -1211,28 +1211,53 @@
           const now = new Date()
           const mine = this.myNickname()
 
-          // First, check events
+          // Collect all upcoming departures (events and routines)
+          const departures = []
+
+          // Check events
           const events = this.filteredAgenda()
-          const eventWithDeparture = events.find((e) => new Date(e.start) > now && e.suggested_departure)
-
-          if (eventWithDeparture) {
-            console.log('nextDepartureLabel: found event with departure', eventWithDeparture.title)
-            return this.fmtTime(eventWithDeparture.suggested_departure)
-          }
-
-          // If no event, check routines for today
-          const todayRoutines = this.todaysRoutineActions()
-          console.log('nextDepartureLabel: checking routines', { mine, todayRoutines })
-
-          // Find the next routine action (either outbound or return) that the user is responsible for
-          if (todayRoutines.length > 0) {
-            // Sort by time to get the next one
-            const nextRoutine = todayRoutines[0]
-            if (nextRoutine && nextRoutine.time) {
-              console.log('nextDepartureLabel: found routine', nextRoutine.text, nextRoutine.time)
-              // For routines, we assume departure is at the routine time (no travel time calculation for now)
-              return nextRoutine.time
+          events.forEach((e) => {
+            if (new Date(e.start) > now && e.suggested_departure) {
+              departures.push({
+                time: new Date(e.suggested_departure),
+                label: `${e.title}`,
+              })
             }
+          })
+
+          // Check routines
+          const routines = this.routines
+          const shortDay = new Date().toLocaleDateString('es-AR', { weekday: 'short', timeZone: AR_TZ })
+          const dayKey = this.normalizeDayToken(shortDay)
+
+          routines.forEach((r) => {
+            if (!r.is_active) return
+            const values = (r.days || []).map((d) => this.normalizeDayToken(d))
+            if (!values.includes(dayKey)) return
+
+            // Check outbound
+            if ((r.outbound_responsible || '').toLowerCase() === mine && r.suggested_departure_outbound) {
+              departures.push({
+                time: new Date(r.suggested_departure_outbound),
+                label: `Llevar a ${r.children.join(' y ') || 'los chicos'} a ${r.place_name || r.place_alias}`,
+              })
+            }
+
+            // Check return
+            if ((r.return_responsible || '').toLowerCase() === mine && r.suggested_departure_return) {
+              departures.push({
+                time: new Date(r.suggested_departure_return),
+                label: `Buscar a ${r.children.join(' y ') || 'los chicos'} de ${r.place_name || r.place_alias}`,
+              })
+            }
+          })
+
+          // Find the next departure
+          if (departures.length > 0) {
+            departures.sort((a, b) => a.time - b.time)
+            const next = departures[0]
+            console.log('nextDepartureLabel: next departure', next)
+            return this.fmtTime(next.time.toISOString())
           }
 
           return 'Sin salidas asignadas'

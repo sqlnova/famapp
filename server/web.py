@@ -184,6 +184,33 @@ def _suggest_departure(start: datetime, location: Optional[str]) -> str:
     return leave.astimezone(AR_TZ).isoformat()
 
 
+def _suggest_departure_for_routine(time_str: str, location: Optional[str]) -> Optional[str]:
+    """Calculate departure time for a routine action given time string (HH:MM format)."""
+    if not time_str:
+        return None
+    try:
+        # Parse time string and create datetime for today
+        h, m = map(int, time_str.split(':'))
+        now = datetime.now(AR_TZ)
+        action_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
+
+        # Skip if action time is in the past
+        if action_time <= now:
+            return None
+
+        # Calculate departure time
+        departure_iso = _suggest_departure(action_time, location)
+        departure_time = datetime.fromisoformat(departure_iso)
+
+        # Skip if calculated departure time is also in the past
+        if departure_time <= now:
+            return None
+
+        return departure_iso
+    except (ValueError, AttributeError):
+        return None
+
+
 def _infer_user_nickname(user: Any) -> Optional[str]:
     """Best-effort map from auth email to family nickname."""
     email = (getattr(user, "email", "") or "").strip().lower()
@@ -775,8 +802,12 @@ async def api_routines(user=Depends(require_auth)):
             logger.warning("routines_tasks_fallback_read_failed", error=str(fallback_error))
             if not _allow_local_fallback():
                 raise HTTPException(status_code=503, detail="No se pudo leer rutinas desde la base de datos.")
-    rows = [
-        {
+
+    user_nickname = _infer_user_nickname(user)
+    rows = []
+    for r in routines:
+        location = r.place_name or r.place_alias
+        row = {
             "id": str(r.id),
             "title": r.title,
             "days": r.days,
@@ -789,18 +820,39 @@ async def api_routines(user=Depends(require_auth)):
             "place_name": r.place_name,
             "is_active": r.is_active,
         }
-        for r in routines
-    ]
+        # Calculate suggested departure times if user is responsible
+        if user_nickname:
+            if (r.outbound_responsible or "").strip().lower() == user_nickname:
+                row["suggested_departure_outbound"] = _suggest_departure_for_routine(r.outbound_time, location)
+            if (r.return_responsible or "").strip().lower() == user_nickname:
+                row["suggested_departure_return"] = _suggest_departure_for_routine(r.return_time, location)
+        rows.append(row)
     if _allow_local_fallback():
         local_rows = local_list_routines()
         if local_rows:
             seen = {str(r["id"]) for r in rows}
-            rows.extend([r for r in local_rows if str(r.get("id")) not in seen])
+            for r in local_rows:
+                if str(r.get("id")) not in seen:
+                    location = r.get("place_name") or r.get("place_alias")
+                    if user_nickname:
+                        if (r.get("outbound_responsible") or "").strip().lower() == user_nickname:
+                            r["suggested_departure_outbound"] = _suggest_departure_for_routine(r.get("outbound_time"), location)
+                        if (r.get("return_responsible") or "").strip().lower() == user_nickname:
+                            r["suggested_departure_return"] = _suggest_departure_for_routine(r.get("return_time"), location)
+                    rows.append(r)
     try:
         tasks_rows = _list_routines_from_tasks_store()
         if tasks_rows:
             seen = {str(r["id"]) for r in rows}
-            rows.extend([r for r in tasks_rows if str(r.get("id")) not in seen])
+            for r in tasks_rows:
+                if str(r.get("id")) not in seen:
+                    location = r.get("place_name") or r.get("place_alias")
+                    if user_nickname:
+                        if (r.get("outbound_responsible") or "").strip().lower() == user_nickname:
+                            r["suggested_departure_outbound"] = _suggest_departure_for_routine(r.get("outbound_time"), location)
+                        if (r.get("return_responsible") or "").strip().lower() == user_nickname:
+                            r["suggested_departure_return"] = _suggest_departure_for_routine(r.get("return_time"), location)
+                    rows.append(r)
     except Exception:
         logger.debug("routines_tasks_fallback_merge_skipped")
     return rows
