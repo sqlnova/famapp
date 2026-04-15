@@ -289,12 +289,13 @@
             <p class="text-sm text-slate-600 mb-4">Selecciona las tareas que quieres crear:</p>
 
             <template x-for="(task, idx) in suggestedTasks" :key="`suggestion-${idx}`">
-              <div class="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div class="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-100 transition"
+                @click="toggleSuggestion(idx)">
                 <input
                   type="checkbox"
-                  @change="toggleSuggestion(idx)"
-                  x-model="suggestedTasks[idx].selected"
+                  :checked="suggestedTasks[idx].selected"
                   class="mt-1 w-5 h-5 rounded accent-iosBlue cursor-pointer"
+                  @click.stop
                 >
                 <div class="flex-1">
                   <p class="font-medium text-sm" x-text="task.title"></p>
