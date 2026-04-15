@@ -602,6 +602,7 @@
             headers: {
               Authorization: `Bearer ${this.token}`,
               'Content-Type': 'application/json',
+              ...(this.userNickname ? { 'X-User-Nickname': this.userNickname } : {}),
               ...(options.headers || {}),
             },
           })
