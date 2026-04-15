@@ -791,70 +791,57 @@ async def api_routines(user=Depends(require_auth)):
     except Exception as error:
         logger.warning("routines_db_read_failed", error=str(error))
         try:
-            rows = _list_routines_from_tasks_store()
+            routines = _list_routines_from_tasks_store()
             if _allow_local_fallback():
                 local_rows = local_list_routines()
                 if local_rows:
-                    seen = {str(r["id"]) for r in rows}
-                    rows.extend([r for r in local_rows if str(r.get("id")) not in seen])
-            return rows
+                    seen = {str(r["id"]) for r in routines}
+                    routines.extend([r for r in local_rows if str(r.get("id")) not in seen])
         except Exception as fallback_error:
             logger.warning("routines_tasks_fallback_read_failed", error=str(fallback_error))
             if not _allow_local_fallback():
                 raise HTTPException(status_code=503, detail="No se pudo leer rutinas desde la base de datos.")
+            routines = local_list_routines()
 
     user_nickname = _infer_user_nickname(user)
     rows = []
+    seen = set()
+
     for r in routines:
-        location = r.place_name or r.place_alias
+        # Handle both model objects and dictionaries
+        is_dict = isinstance(r, dict)
+        r_id = str(r.get("id") if is_dict else r.id)
+        if r_id in seen:
+            continue
+        seen.add(r_id)
+
+        place_name = r.get("place_name") if is_dict else r.place_name
+        place_alias = r.get("place_alias") if is_dict else r.place_alias
+        location = place_name or place_alias
+
         row = {
-            "id": str(r.id),
-            "title": r.title,
-            "days": r.days,
-            "children": r.children or [],
-            "outbound_time": r.outbound_time,
-            "return_time": r.return_time,
-            "outbound_responsible": r.outbound_responsible,
-            "return_responsible": r.return_responsible,
-            "place_alias": r.place_alias,
-            "place_name": r.place_name,
-            "is_active": r.is_active,
+            "id": r_id,
+            "title": r.get("title") if is_dict else r.title,
+            "days": r.get("days") if is_dict else r.days,
+            "children": (r.get("children") or []) if is_dict else (r.children or []),
+            "outbound_time": r.get("outbound_time") if is_dict else r.outbound_time,
+            "return_time": r.get("return_time") if is_dict else r.return_time,
+            "outbound_responsible": r.get("outbound_responsible") if is_dict else r.outbound_responsible,
+            "return_responsible": r.get("return_responsible") if is_dict else r.return_responsible,
+            "place_alias": place_alias,
+            "place_name": place_name,
+            "is_active": r.get("is_active", True) if is_dict else r.is_active,
         }
         # Calculate suggested departure times if user is responsible
         if user_nickname:
-            if (r.outbound_responsible or "").strip().lower() == user_nickname:
-                row["suggested_departure_outbound"] = _suggest_departure_for_routine(r.outbound_time, location)
-            if (r.return_responsible or "").strip().lower() == user_nickname:
-                row["suggested_departure_return"] = _suggest_departure_for_routine(r.return_time, location)
+            outbound_resp = (row.get("outbound_responsible") or "").strip().lower()
+            return_resp = (row.get("return_responsible") or "").strip().lower()
+            if outbound_resp == user_nickname:
+                row["suggested_departure_outbound"] = _suggest_departure_for_routine(row.get("outbound_time"), location)
+            if return_resp == user_nickname:
+                row["suggested_departure_return"] = _suggest_departure_for_routine(row.get("return_time"), location)
         rows.append(row)
-    if _allow_local_fallback():
-        local_rows = local_list_routines()
-        if local_rows:
-            seen = {str(r["id"]) for r in rows}
-            for r in local_rows:
-                if str(r.get("id")) not in seen:
-                    location = r.get("place_name") or r.get("place_alias")
-                    if user_nickname:
-                        if (r.get("outbound_responsible") or "").strip().lower() == user_nickname:
-                            r["suggested_departure_outbound"] = _suggest_departure_for_routine(r.get("outbound_time"), location)
-                        if (r.get("return_responsible") or "").strip().lower() == user_nickname:
-                            r["suggested_departure_return"] = _suggest_departure_for_routine(r.get("return_time"), location)
-                    rows.append(r)
-    try:
-        tasks_rows = _list_routines_from_tasks_store()
-        if tasks_rows:
-            seen = {str(r["id"]) for r in rows}
-            for r in tasks_rows:
-                if str(r.get("id")) not in seen:
-                    location = r.get("place_name") or r.get("place_alias")
-                    if user_nickname:
-                        if (r.get("outbound_responsible") or "").strip().lower() == user_nickname:
-                            r["suggested_departure_outbound"] = _suggest_departure_for_routine(r.get("outbound_time"), location)
-                        if (r.get("return_responsible") or "").strip().lower() == user_nickname:
-                            r["suggested_departure_return"] = _suggest_departure_for_routine(r.get("return_time"), location)
-                    rows.append(r)
-    except Exception:
-        logger.debug("routines_tasks_fallback_merge_skipped")
+
     return rows
 
 
