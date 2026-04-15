@@ -874,15 +874,22 @@
 
         memberTasks(member) {
           const nick = (member.nickname || '').toLowerCase()
+          const name = (member.name || '').toLowerCase()
           const eventTasks = this.todayEvents().filter((e) => {
             const responsible = (e.responsible_nickname || '').toLowerCase()
-            return responsible === nick
+            return responsible === nick || responsible === name
           }).map((e) => ({ title: e.title, start: e.start, auto_generated: true }))
           const manualTasks = this.tasks
             .filter((t) => t.status !== 'done')
-            .filter((t) => (t.assignee || '').toLowerCase() === nick)
+            .filter((t) => {
+              const assignee = (t.assignee || '').toLowerCase()
+              return assignee === nick || assignee === name
+            })
           const generated = this.generatedTasksFromEvents()
-            .filter((t) => (t.assignee || '').toLowerCase() === nick)
+            .filter((t) => {
+              const assignee = (t.assignee || '').toLowerCase()
+              return assignee === nick || assignee === name
+            })
           return [...manualTasks, ...eventTasks, ...generated]
         },
 
