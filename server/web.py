@@ -194,11 +194,19 @@ def _suggest_departure_for_routine(time_str: str, location: Optional[str]) -> Op
         now = datetime.now(AR_TZ)
         action_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
 
-        # Skip if time is in the past
+        # Skip if action time is in the past
         if action_time <= now:
             return None
 
-        return _suggest_departure(action_time, location)
+        # Calculate departure time
+        departure_iso = _suggest_departure(action_time, location)
+        departure_time = datetime.fromisoformat(departure_iso)
+
+        # Skip if calculated departure time is also in the past
+        if departure_time <= now:
+            return None
+
+        return departure_iso
     except (ValueError, AttributeError):
         return None
 
