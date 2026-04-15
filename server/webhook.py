@@ -13,6 +13,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from core.config import get_settings
 from core.models import IncomingWhatsAppMessage, MessageRecord, MessageStatus
+from core.privacy import mask_phone, redact_text_meta
 from core.supabase_client import upsert_message
 from agents.intake.graph import run_intake
 from server.web import router as web_router
@@ -49,6 +50,18 @@ app = FastAPI(title="FamApp", version="0.3.0", lifespan=lifespan)
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 app.mount("/app/static", StaticFiles(directory="server/static"), name="static")
 app.include_router(web_router)
+
+
+@app.middleware("http")
+async def enforce_https(request: Request, call_next):
+    """Enforce HTTPS in production environments."""
+    s = get_settings()
+    if s.is_production and request.url.scheme != "https":
+        https_url = str(request.url).replace("http://", "https://", 1)
+        if request.method in {"GET", "HEAD"}:
+            return RedirectResponse(url=https_url, status_code=307)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="HTTPS required")
+    return await call_next(request)
 
 
 # ── Twilio signature validation ───────────────────────────────────────────────
@@ -104,7 +117,12 @@ async def whatsapp_webhook(
         MediaUrl0=MediaUrl0 or None,
     )
 
-    logger.info("whatsapp_received", sid=msg.message_sid, from_=msg.from_number, body=msg.body[:80])
+    logger.info(
+        "whatsapp_received",
+        sid=msg.message_sid,
+        from_=mask_phone(msg.from_number),
+        body_meta=redact_text_meta(msg.body),
+    )
 
     record = MessageRecord(
         message_sid=msg.message_sid,
