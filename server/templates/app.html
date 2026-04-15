@@ -602,6 +602,7 @@
             headers: {
               Authorization: `Bearer ${this.token}`,
               'Content-Type': 'application/json',
+              ...(this.userNickname ? { 'X-User-Nickname': this.userNickname } : {}),
               ...(options.headers || {}),
             },
           })
@@ -1256,10 +1257,11 @@
           if (departures.length > 0) {
             departures.sort((a, b) => a.time - b.time)
             const next = departures[0]
-            console.log('nextDepartureLabel: next departure', next)
+            console.log('nextDepartureLabel: next departure', next, 'myNickname:', mine, 'routines:', routines)
             return this.fmtTime(next.time.toISOString())
           }
 
+          console.log('nextDepartureLabel: no departures found', 'myNickname:', mine, 'events:', events.length, 'routines:', routines.length)
           return 'Sin salidas asignadas'
         },
 

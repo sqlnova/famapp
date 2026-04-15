@@ -332,10 +332,11 @@ async def index(request: Request):
 # ── API ───────────────────────────────────────────────────────────────────────
 
 @router.get("/api/events")
-async def api_events(user=Depends(require_auth)):
+async def api_events(user=Depends(require_auth), x_user_nickname: Optional[str] = Header(None)):
     loop = asyncio.get_event_loop()
     events = await loop.run_in_executor(None, lambda: list_upcoming_events(days=30))
-    user_nickname = _infer_user_nickname(user)
+    # Use nickname from header if provided, otherwise try to infer from email
+    user_nickname = (x_user_nickname or "").strip().lower() if x_user_nickname else _infer_user_nickname(user)
     return [
         {
             "id": e.id,
@@ -784,7 +785,7 @@ async def remove_place(alias: str, user=Depends(require_auth)):
 # ── Routines ──────────────────────────────────────────────────────────────────
 
 @router.get("/api/routines")
-async def api_routines(user=Depends(require_auth)):
+async def api_routines(user=Depends(require_auth), x_user_nickname: Optional[str] = Header(None)):
     routines = []
     try:
         routines = list_family_routines()
@@ -803,7 +804,8 @@ async def api_routines(user=Depends(require_auth)):
                 raise HTTPException(status_code=503, detail="No se pudo leer rutinas desde la base de datos.")
             routines = local_list_routines()
 
-    user_nickname = _infer_user_nickname(user)
+    # Use nickname from header if provided, otherwise try to infer from email
+    user_nickname = (x_user_nickname or "").strip().lower() if x_user_nickname else _infer_user_nickname(user)
     rows = []
     seen = set()
 
