@@ -1209,17 +1209,33 @@
 
         nextDepartureLabel() {
           const now = new Date()
-          const events = this.filteredAgenda()
-          console.log('nextDepartureLabel debug:', {
-            totalEvents: this.events.length,
-            filteredEvents: events.length,
-            events: events.map(e => ({ title: e.title, start: e.start, location: e.location, suggested_departure: e.suggested_departure, responsible: e.responsible_nickname, myNickname: this.myNickname() }))
-          })
+          const mine = this.myNickname()
 
-          // Only show departure time if user is responsible for an event (has suggested_departure)
-          const event = events.find((e) => new Date(e.start) > now && e.suggested_departure)
-          console.log('nextDepartureLabel: found event?', !!event, event?.title)
-          return event ? this.fmtTime(event.suggested_departure) : 'Sin salidas asignadas'
+          // First, check events
+          const events = this.filteredAgenda()
+          const eventWithDeparture = events.find((e) => new Date(e.start) > now && e.suggested_departure)
+
+          if (eventWithDeparture) {
+            console.log('nextDepartureLabel: found event with departure', eventWithDeparture.title)
+            return this.fmtTime(eventWithDeparture.suggested_departure)
+          }
+
+          // If no event, check routines for today
+          const todayRoutines = this.todaysRoutineActions()
+          console.log('nextDepartureLabel: checking routines', { mine, todayRoutines })
+
+          // Find the next routine action (either outbound or return) that the user is responsible for
+          if (todayRoutines.length > 0) {
+            // Sort by time to get the next one
+            const nextRoutine = todayRoutines[0]
+            if (nextRoutine && nextRoutine.time) {
+              console.log('nextDepartureLabel: found routine', nextRoutine.text, nextRoutine.time)
+              // For routines, we assume departure is at the routine time (no travel time calculation for now)
+              return nextRoutine.time
+            }
+          }
+
+          return 'Sin salidas asignadas'
         },
 
         suggestDeparture(startIso) {
