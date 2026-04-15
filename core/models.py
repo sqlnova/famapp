@@ -112,6 +112,7 @@ class FamilyRoutine(BaseModel):
     id: Optional[UUID] = None
     title: str
     days: List[str] = Field(default_factory=list)
+    children: Optional[List[str]] = None
     outbound_time: Optional[str] = None
     return_time: Optional[str] = None
     outbound_responsible: Optional[str] = None
