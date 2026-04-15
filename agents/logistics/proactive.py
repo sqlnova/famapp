@@ -55,7 +55,7 @@ def _save_alert(
     leave_at: datetime,
     responsible_whatsapp: Optional[str] = None,
 ) -> None:
-    s = get_settings()
+    from core.whatsapp import _get_broadcast_recipients
     client = get_supabase()
     client.table("logistics_alerts").insert({
         "calendar_event_id": event.id,
@@ -66,7 +66,7 @@ def _save_alert(
         "travel_minutes": travel_minutes,
         "leave_at_utc": leave_at.astimezone(timezone.utc).isoformat(),
         "sent": False,
-        "send_to": s.phone_list,
+        "send_to": _get_broadcast_recipients(),
         "responsible_whatsapp": responsible_whatsapp,
     }).execute()
     logger.info(
@@ -147,13 +147,8 @@ async def _process_event(event: CalendarEvent) -> None:
     """For a single calendar event, calculate travel time and fire alert if needed."""
     if not event.location or not event.id:
         return
-    # Skip recurring event instances — they fire every day and become noise.
-    # Users who want a one-off reminder say "haceme acordar de..." which creates
-    # a standalone (non-recurring) event that DOES get an alert.
-    if not event.alerts_enabled:
-        logger.debug("logistics_alert_skipped_recurring", event=event.title)
-        return
-
+    # Recurring instances each have a unique event.id (e.g. base_id_YYYYMMDDTHHMMSSZ),
+    # so _alert_already_scheduled() already prevents duplicates within the same occurrence.
     if _alert_already_scheduled(event.id):
         logger.debug("logistics_alert_exists", event=event.title)
         return
