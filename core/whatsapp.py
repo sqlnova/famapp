@@ -7,6 +7,7 @@ import structlog
 from twilio.rest import Client as TwilioClient
 
 from core.config import get_settings
+from core.privacy import mask_phone, redact_text_meta
 
 logger = structlog.get_logger(__name__)
 
@@ -31,7 +32,13 @@ def send_whatsapp_message(to: str, body: str) -> str:
     from_wa = s.twilio_whatsapp_from
 
     msg = client.messages.create(body=body, from_=from_wa, to=to_wa)
-    logger.info("whatsapp_sent", to=to_wa, sid=msg.sid, status=msg.status)
+    logger.info(
+        "whatsapp_sent",
+        to=mask_phone(to_wa),
+        sid=msg.sid,
+        status=msg.status,
+        body_meta=redact_text_meta(body),
+    )
     return msg.sid
 
 
@@ -45,5 +52,5 @@ def broadcast_whatsapp_message(body: str, recipients: Optional[List[str]] = None
             sid = send_whatsapp_message(to, body)
             sids.append(sid)
         except Exception:
-            logger.exception("whatsapp_broadcast_error", to=to)
+            logger.exception("whatsapp_broadcast_error", to=mask_phone(to))
     return sids
