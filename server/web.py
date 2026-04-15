@@ -823,12 +823,28 @@ async def api_routines(user=Depends(require_auth)):
         local_rows = local_list_routines()
         if local_rows:
             seen = {str(r["id"]) for r in rows}
-            rows.extend([r for r in local_rows if str(r.get("id")) not in seen])
+            for r in local_rows:
+                if str(r.get("id")) not in seen:
+                    location = r.get("place_name") or r.get("place_alias")
+                    if user_nickname:
+                        if (r.get("outbound_responsible") or "").strip().lower() == user_nickname:
+                            r["suggested_departure_outbound"] = _suggest_departure_for_routine(r.get("outbound_time"), location)
+                        if (r.get("return_responsible") or "").strip().lower() == user_nickname:
+                            r["suggested_departure_return"] = _suggest_departure_for_routine(r.get("return_time"), location)
+                    rows.append(r)
     try:
         tasks_rows = _list_routines_from_tasks_store()
         if tasks_rows:
             seen = {str(r["id"]) for r in rows}
-            rows.extend([r for r in tasks_rows if str(r.get("id")) not in seen])
+            for r in tasks_rows:
+                if str(r.get("id")) not in seen:
+                    location = r.get("place_name") or r.get("place_alias")
+                    if user_nickname:
+                        if (r.get("outbound_responsible") or "").strip().lower() == user_nickname:
+                            r["suggested_departure_outbound"] = _suggest_departure_for_routine(r.get("outbound_time"), location)
+                        if (r.get("return_responsible") or "").strip().lower() == user_nickname:
+                            r["suggested_departure_return"] = _suggest_departure_for_routine(r.get("return_time"), location)
+                    rows.append(r)
     except Exception:
         logger.debug("routines_tasks_fallback_merge_skipped")
     return rows
