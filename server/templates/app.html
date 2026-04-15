@@ -394,7 +394,24 @@
         </div>
 
         <div class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
-          <h3 class="font-medium">Lugares frecuentes</h3>
+          <div class="flex items-center justify-between">
+            <h3 class="font-medium">Lugares frecuentes</h3>
+            <span class="text-xs text-iosBlue" x-text="places.length"></span>
+          </div>
+          <div class="space-y-2">
+            <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Listado actual</p>
+            <template x-for="p in places" :key="p.alias">
+              <div class="py-2 border-b border-slate-100 last:border-b-0 flex justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium" x-text="p.name || p.alias"></p>
+                  <p class="text-xs text-slate-500" x-text="p.address"></p>
+                </div>
+                <button @click="deletePlace(p.alias)" class="text-xs text-red-500">Eliminar</button>
+              </div>
+            </template>
+            <p x-show="places.length===0" class="text-sm text-slate-400">Todavía no hay lugares guardados.</p>
+          </div>
+          <p class="text-xs font-medium text-slate-500 uppercase tracking-wide pt-2 border-t border-slate-100">Agregar / editar</p>
           <div class="space-y-2">
             <input x-model="newPlace.alias" placeholder="Alias" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
             <input x-model="newPlace.name" placeholder="Nombre" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
@@ -402,15 +419,6 @@
             <input x-model="newPlace.type" placeholder="Tipo (colegio, deporte...)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
             <button @click="savePlace" class="w-full bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Guardar lugar</button>
           </div>
-          <template x-for="p in places" :key="p.alias">
-            <div class="py-2 border-b border-slate-100 last:border-b-0 flex justify-between gap-3">
-              <div>
-                <p class="text-sm font-medium" x-text="p.name || p.alias"></p>
-                <p class="text-xs text-slate-500" x-text="p.address"></p>
-              </div>
-              <button @click="deletePlace(p.alias)" class="text-xs text-red-500">Eliminar</button>
-            </div>
-          </template>
         </div>
       </section>
     </main>
@@ -521,7 +529,13 @@
             await this.logout()
             return null
           }
-          return res.ok ? res.json() : null
+          if (res.ok) return res.json()
+          let detail = 'Error inesperado'
+          try {
+            const body = await res.json()
+            detail = body?.detail || detail
+          } catch (_err) {}
+          return { __error: detail, status: res.status }
         },
 
         async loadData() {
@@ -533,12 +547,12 @@
             this.api('/routines'),
             this.api('/tasks'),
           ])
-          this.events = events || []
-          this.shoppingPending = shopping?.pending || []
-          this.family = family || []
-          this.places = places || []
-          this.routines = routines || []
-          this.tasks = tasks || []
+          this.events = Array.isArray(events) ? events : []
+          this.shoppingPending = shopping?.pending && Array.isArray(shopping.pending) ? shopping.pending : []
+          this.family = Array.isArray(family) ? family : []
+          this.places = Array.isArray(places) ? places : []
+          this.routines = Array.isArray(routines) ? routines : []
+          this.tasks = Array.isArray(tasks) ? tasks : []
         },
 
         async addShopping() {
@@ -728,8 +742,9 @@
             is_active: true,
           }
           const saved = await this.api('/routines', { method: 'POST', body: JSON.stringify(payload) })
-          if (!saved) {
-            window.alert('No pude guardar la rutina. Revisá los campos e intentá de nuevo.')
+          if (!saved || saved.__error) {
+            const detail = saved?.__error ? `\n\nDetalle: ${saved.__error}` : ''
+            window.alert(`No pude guardar la rutina.${detail}`)
             return
           }
           this.showRoutineForm = false

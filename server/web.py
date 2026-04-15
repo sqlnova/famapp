@@ -438,7 +438,29 @@ async def delete_task(task_id: UUID, user=Depends(require_auth)):
 @router.get("/api/places")
 async def api_places(user=Depends(require_auth)):
     places = get_all_known_places()
-    return [{"alias": p.alias, "name": p.name, "address": p.address, "type": p.place_type or "general"} for p in places]
+    rows = [{"alias": p.alias, "name": p.name, "address": p.address, "type": p.place_type or "general"} for p in places]
+    if rows:
+        return rows
+
+    # Fallback: if known_places is empty, expose places referenced by routines
+    routines = list_family_routines()
+    derived = []
+    seen = set()
+    for r in routines:
+        alias = (r.place_alias or r.place_name or "").strip().lower()
+        name = (r.place_name or r.place_alias or "").strip()
+        if not alias or alias in seen:
+            continue
+        seen.add(alias)
+        derived.append(
+            {
+                "alias": alias,
+                "name": name or alias,
+                "address": "",
+                "type": "general",
+            }
+        )
+    return derived
 
 
 @router.post("/api/places")
@@ -501,7 +523,34 @@ async def api_save_routine(payload: Dict[str, Any] = Body(...), user=Depends(req
         "is_active": payload.get("is_active", True),
         "updated_at": datetime.now(tz=timezone.utc).isoformat(),
     }
-    routine = upsert_family_routine(clean_payload)
+    try:
+        routine = upsert_family_routine(clean_payload)
+    except Exception as first_error:
+        logger.warning("routine_upsert_full_failed", error=str(first_error))
+        # Backward-compatible fallback for older DB schemas missing newer columns.
+        fallback_payload = {
+            "id": clean_payload["id"],
+            "title": clean_payload["title"],
+            "days": clean_payload["days"],
+            "outbound_time": clean_payload["outbound_time"],
+            "return_time": clean_payload["return_time"],
+            "outbound_responsible": clean_payload["outbound_responsible"],
+            "return_responsible": clean_payload["return_responsible"],
+            "place_alias": clean_payload["place_alias"],
+            "place_name": clean_payload["place_name"],
+            "is_active": clean_payload["is_active"],
+        }
+        try:
+            routine = upsert_family_routine(fallback_payload)
+        except Exception as second_error:
+            logger.exception("routine_upsert_fallback_failed")
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No se pudo guardar la rutina. "
+                    "Revisá formato de horas (HH:MM), días y configuración de base de datos."
+                ),
+            ) from second_error
 
     if is_new:
         try:
