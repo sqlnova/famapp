@@ -298,10 +298,14 @@
               </button>
               <button
                 @click="createSuggestedTasks"
-                :disabled="!suggestedTasks.some(t => t.selected)"
-                class="flex-1 bg-iosBlue text-white rounded-2xl py-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                class="flex-1 bg-iosBlue text-white rounded-2xl py-3 text-sm font-medium"
               >
-                Crear <span x-text="suggestedTasks.filter(t => t.selected).length"></span> tarea(s)
+                <span x-show="suggestedTasks.some(t => t.selected)">
+                  Crear <span x-text="suggestedTasks.filter(t => t.selected).length"></span> tarea(s)
+                </span>
+                <span x-show="!suggestedTasks.some(t => t.selected)">
+                  Continuar
+                </span>
               </button>
             </div>
           </div>
@@ -1117,9 +1121,23 @@
           const email = (this.user?.email || '').toLowerCase()
           if (!email.includes('@')) return ''
           const local = email.split('@')[0]
+
+          // Normalize function to remove accents for comparison
+          const normalize = (str) => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          const normalizedLocal = normalize(local)
+
           const match = this.family.find((m) => {
             const nick = (m.nickname || '').toLowerCase()
-            return nick && (local === nick || local.startsWith(`${nick}.`) || local.endsWith(`.${nick}`))
+            const normalizedNick = normalize(nick)
+            // Try exact match, or match with normalized versions (removing accents)
+            return nick && (
+              local === nick ||
+              normalizedLocal === normalizedNick ||
+              local.startsWith(`${nick}.`) ||
+              normalizedLocal.startsWith(`${normalizedNick}.`) ||
+              local.endsWith(`.${nick}`) ||
+              normalizedLocal.endsWith(`.${normalizedNick}`)
+            )
           })
           return (match?.nickname || '').toLowerCase()
         },
