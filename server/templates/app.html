@@ -142,6 +142,11 @@
 
         <template x-if="agendaFilter==='hoy'">
           <div class="space-y-3">
+            <div class="bg-white rounded-3xl p-3 border border-slate-100 flex items-center justify-between">
+              <button @click="shiftSelectedDay(-1)" class="text-iosBlue text-sm px-2 py-1 rounded-lg bg-slate-50">← Día anterior</button>
+              <p class="text-sm font-medium" x-text="selectedDateLabel()"></p>
+              <button @click="shiftSelectedDay(1)" class="text-iosBlue text-sm px-2 py-1 rounded-lg bg-slate-50">Día siguiente →</button>
+            </div>
             <template x-for="event in filteredAgenda()" :key="event.id + event.start">
               <article class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
                 <div class="flex justify-between items-start gap-2">
@@ -168,6 +173,18 @@
               </article>
             </template>
             <p x-show="filteredAgenda().length===0" class="text-sm text-slate-400">No hay eventos para este día.</p>
+            <div x-show="filteredAgenda().length===0 && upcomingEvents().length>0" class="bg-white rounded-3xl p-3 border border-slate-100 space-y-2">
+              <div class="flex items-center justify-between">
+                <p class="text-sm font-medium">Próximos eventos</p>
+                <button @click="jumpToNextEvent()" class="text-xs text-iosBlue">Ir al próximo</button>
+              </div>
+              <template x-for="event in upcomingEvents(3)" :key="`upcoming-${event.id}-${event.start}`">
+                <p class="text-xs text-slate-600">
+                  <span class="font-medium" x-text="fmtAgendaDate(event.start)"></span> ·
+                  <span x-text="event.title"></span>
+                </p>
+              </template>
+            </div>
           </div>
         </template>
 
@@ -671,12 +688,17 @@
         },
 
         async saveRoutine() {
+          const days = this.normalizeRoutineDays(this.routineForm.daysInput)
           const payload = {
             ...this.routineForm,
-            days: this.routineForm.daysInput.split(',').map((d) => d.trim()).filter(Boolean),
+            days,
             is_active: true,
           }
-          await this.api('/routines', { method: 'POST', body: JSON.stringify(payload) })
+          const saved = await this.api('/routines', { method: 'POST', body: JSON.stringify(payload) })
+          if (!saved) {
+            window.alert('No pude guardar la rutina. Revisá los campos e intentá de nuevo.')
+            return
+          }
           this.showRoutineForm = false
           await this.loadData()
         },
@@ -704,6 +726,22 @@
         openDay(date) {
           this.selectedAgendaDate = this.toDateKey(date)
           this.agendaFilter = 'hoy'
+        },
+
+        shiftSelectedDay(delta) {
+          const base = this.selectedAgendaDate ? new Date(`${this.selectedAgendaDate}T00:00:00`) : new Date()
+          base.setDate(base.getDate() + delta)
+          this.selectedAgendaDate = this.toDateKey(base)
+        },
+
+        selectedDateLabel() {
+          const base = this.selectedAgendaDate ? new Date(`${this.selectedAgendaDate}T00:00:00`) : new Date()
+          return base.toLocaleDateString('es-AR', {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            timeZone: AR_TZ,
+          }).replace('.', '')
         },
 
         weekDays() {
@@ -746,6 +784,20 @@
         eventsForDate(date) {
           const key = this.toDateKey(date)
           return this.events.filter((e) => this.toDateKey(new Date(e.start)) === key)
+        },
+
+        upcomingEvents(limit = 5) {
+          const now = new Date()
+          return [...this.events]
+            .filter((e) => new Date(e.start) >= now)
+            .sort((a, b) => new Date(a.start) - new Date(b.start))
+            .slice(0, limit)
+        },
+
+        jumpToNextEvent() {
+          const next = this.upcomingEvents(1)[0]
+          if (!next) return
+          this.openDay(new Date(next.start))
         },
 
         memberTaskSummary(events) {
@@ -836,22 +888,43 @@
           return out
         },
 
-        todaysRoutines() {
-          const shortDay = new Date().toLocaleDateString('es-AR', { weekday: 'short', timeZone: AR_TZ }).toLowerCase().replace('.', '')
-          const dayMap = {
-            lun: ['lun', 'lunes'],
-            mar: ['mar', 'martes'],
-            mié: ['mie', 'mié', 'miércoles', 'miercoles'],
-            jue: ['jue', 'jueves'],
-            vie: ['vie', 'viernes'],
-            sáb: ['sab', 'sáb', 'sábado', 'sabado'],
-            dom: ['dom', 'domingo'],
+        normalizeDayToken(dayRaw) {
+          const day = (dayRaw || '').toString().trim().toLowerCase()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          const map = {
+            lu: 'lun', lun: 'lun', lunes: 'lun', mo: 'lun', monday: 'lun',
+            ma: 'mar', mar: 'mar', martes: 'mar', tu: 'mar', tuesday: 'mar',
+            mi: 'mie', mie: 'mie', miercoles: 'mie', we: 'mie', wednesday: 'mie',
+            ju: 'jue', jue: 'jue', jueves: 'jue', th: 'jue', thursday: 'jue',
+            vi: 'vie', vie: 'vie', viernes: 'vie', fr: 'vie', friday: 'vie',
+            sa: 'sab', sab: 'sab', sabado: 'sab', saturday: 'sab',
+            do: 'dom', dom: 'dom', domingo: 'dom', su: 'dom', sunday: 'dom',
           }
-          const keys = dayMap[shortDay] || [shortDay]
+          return map[day] || day
+        },
+
+        normalizeRoutineDays(daysInput) {
+          const raw = (daysInput || '').toString().trim()
+          if (!raw) return []
+          const normalized = raw.toLowerCase()
+            .replace(/lunes a viernes/g, 'lun,mar,mie,jue,vie')
+            .replace(/de lunes a viernes/g, 'lun,mar,mie,jue,vie')
+            .replace(/lunes a sabado/g, 'lun,mar,mie,jue,vie,sab')
+            .replace(/de lunes a sabado/g, 'lun,mar,mie,jue,vie,sab')
+          const unique = []
+          normalized.split(',').map((d) => this.normalizeDayToken(d)).forEach((d) => {
+            if (d && !unique.includes(d)) unique.push(d)
+          })
+          return unique
+        },
+
+        todaysRoutines() {
+          const shortDay = new Date().toLocaleDateString('es-AR', { weekday: 'short', timeZone: AR_TZ })
+          const key = this.normalizeDayToken(shortDay)
           return this.routines.filter((r) => {
             if (!r.is_active) return false
-            const values = (r.days || []).map((d) => d.toLowerCase())
-            return values.some((d) => keys.includes(d))
+            const values = (r.days || []).map((d) => this.normalizeDayToken(d))
+            return values.includes(key)
           })
         },
 
