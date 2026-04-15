@@ -149,11 +149,12 @@
 
         <template x-if="agendaFilter==='hoy'">
           <div class="space-y-3">
-            <div class="bg-white rounded-3xl p-3 border border-slate-100 flex items-center justify-between">
+            <div class="bg-white rounded-3xl p-3 border border-slate-100 flex items-center justify-between gap-2">
               <button @click="shiftSelectedDay(-1)" class="text-iosBlue text-sm px-2 py-1 rounded-lg bg-slate-50">← Día anterior</button>
               <p class="text-sm font-medium" x-text="selectedDateLabel()"></p>
               <button @click="shiftSelectedDay(1)" class="text-iosBlue text-sm px-2 py-1 rounded-lg bg-slate-50">Día siguiente →</button>
             </div>
+            <button @click="createEvent" class="w-full bg-iosBlue text-white rounded-2xl py-2.5 text-sm font-medium">+ Crear evento</button>
             <template x-for="event in filteredAgenda()" :key="event.id + event.start">
               <article class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
                 <div class="flex justify-between items-start gap-2">
@@ -242,7 +243,7 @@
         </template>
 
         <div x-show="showEventForm" class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
-          <h3 class="font-medium">Editar evento</h3>
+          <h3 class="font-medium" x-text="eventForm.id ? 'Editar evento' : 'Crear evento'"></h3>
           <input x-model="eventForm.title" placeholder="Título" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <input x-model="eventForm.start" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <input x-model="eventForm.end" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
@@ -713,12 +714,30 @@
           }
         },
 
+        createEvent() {
+          this.showEventForm = true
+          const now = new Date()
+          const startTime = new Date(now.getTime() + 30 * 60 * 1000) // 30 minutes from now
+          const endTime = new Date(startTime.getTime() + 60 * 60 * 1000) // 1 hour later
+          this.eventForm = {
+            id: '',
+            recurring_event_id: '',
+            title: '',
+            start: this.toLocalDateTime(startTime.toISOString()),
+            end: this.toLocalDateTime(endTime.toISOString()),
+            location: '',
+            responsible_nickname: '',
+            childrenInput: '',
+            apply_to_series: false,
+          }
+        },
+
         cancelEvent() {
           this.showEventForm = false
         },
 
         async saveEvent() {
-          if (!this.eventForm.id || !this.eventForm.start) return
+          if (!this.eventForm.start) return
           const payload = {
             title: this.eventForm.title,
             start: this.toIsoWithTz(this.eventForm.start),
@@ -729,7 +748,14 @@
             recurring_event_id: this.eventForm.recurring_event_id || null,
             apply_to_series: this.eventForm.apply_to_series,
           }
-          await this.api(`/events/${this.eventForm.id}`, { method: 'PUT', body: JSON.stringify(payload) })
+
+          // Create or update
+          if (this.eventForm.id) {
+            await this.api(`/events/${this.eventForm.id}`, { method: 'PUT', body: JSON.stringify(payload) })
+          } else {
+            await this.api(`/events`, { method: 'POST', body: JSON.stringify(payload) })
+          }
+
           this.showEventForm = false
 
           // Fetch task suggestions based on the event
@@ -1101,8 +1127,6 @@
         todaysRoutineActions() {
           const mine = this.myNickname()
           const actions = []
-          // Only show routines where the current user is responsible
-          if (!mine) return actions  // No user nickname, can't filter
 
           this.todaysRoutines().forEach((r) => {
             const children = (r.children || []).join(' y ') || 'los chicos'
@@ -1110,20 +1134,39 @@
             const outResp = (r.outbound_responsible || '').toLowerCase()
             const retResp = (r.return_responsible || '').toLowerCase()
 
-            // Only add if user is the responsible for this action
-            if (mine === outResp && r.outbound_time) {
-              actions.push({
-                key: `${r.id}-out`,
-                time: r.outbound_time || '--:--',
-                text: `Llevar a ${children} a ${place}`,
-              })
-            }
-            if (mine === retResp && r.return_time) {
-              actions.push({
-                key: `${r.id}-ret`,
-                time: r.return_time || '--:--',
-                text: `Buscar a ${children} de ${place}`,
-              })
+            // If user has a valid nickname, only show assigned routines
+            // Otherwise, show all routines (fallback when nickname can't be determined)
+            if (mine) {
+              if (mine === outResp && r.outbound_time) {
+                actions.push({
+                  key: `${r.id}-out`,
+                  time: r.outbound_time || '--:--',
+                  text: `Llevar a ${children} a ${place}`,
+                })
+              }
+              if (mine === retResp && r.return_time) {
+                actions.push({
+                  key: `${r.id}-ret`,
+                  time: r.return_time || '--:--',
+                  text: `Buscar a ${children} de ${place}`,
+                })
+              }
+            } else {
+              // Fallback: show all routines if we can't determine user nickname
+              if (r.outbound_time) {
+                actions.push({
+                  key: `${r.id}-out`,
+                  time: r.outbound_time || '--:--',
+                  text: `Llevar a ${children} a ${place}`,
+                })
+              }
+              if (r.return_time) {
+                actions.push({
+                  key: `${r.id}-ret`,
+                  time: r.return_time || '--:--',
+                  text: `Buscar a ${children} de ${place}`,
+                })
+              }
             }
           })
           return actions.sort((a, b) => (a.time || '').localeCompare(b.time || ''))

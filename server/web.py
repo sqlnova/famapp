@@ -328,6 +328,55 @@ async def api_events(user=Depends(require_auth)):
     ]
 
 
+@router.post("/api/events")
+async def api_create_event(
+    payload: Dict[str, Any] = Body(...),
+    user=Depends(require_auth),
+):
+    start_raw = payload.get("start")
+    if not start_raw:
+        raise HTTPException(status_code=400, detail="start es obligatorio")
+
+    try:
+        start_dt = datetime.fromisoformat(start_raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Fecha de inicio inválida") from exc
+
+    end_raw = payload.get("end")
+    if end_raw:
+        try:
+            end_dt = datetime.fromisoformat(end_raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Fecha de fin inválida") from exc
+    else:
+        end_dt = start_dt + timedelta(hours=1)
+
+    event = CalendarEvent(
+        id="",  # Will be assigned by Google Calendar
+        title=payload.get("title", "Evento sin título"),
+        start=start_dt,
+        end=end_dt,
+        location=payload.get("location", ""),
+        responsible_nickname=payload.get("responsible_nickname", ""),
+        children=payload.get("children") or [],
+        description="",
+        attendees=[],
+        recurring_event_id=None,
+    )
+
+    created = create_event(event)
+    return {
+        "id": created.id,
+        "recurring_event_id": created.recurring_event_id,
+        "title": created.title,
+        "start": created.start.astimezone(AR_TZ).isoformat(),
+        "end": created.end.astimezone(AR_TZ).isoformat(),
+        "location": created.location,
+        "responsible_nickname": created.responsible_nickname,
+        "children": created.children,
+    }
+
+
 @router.put("/api/events/{event_id}")
 async def api_update_event(
     event_id: str,
