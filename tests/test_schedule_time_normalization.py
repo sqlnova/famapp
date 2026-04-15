@@ -1,7 +1,9 @@
 from agents.schedule.nodes import (
     _build_fallback_title,
     _canonicalize_responsible,
+    _extract_time_range,
     _has_explicit_start_date,
+    _minutes_between,
     _normalize_time_str,
 )
 
@@ -38,3 +40,13 @@ def test_canonicalize_responsible_aliases():
     aliases = {"mama": "julieta", "papa": "mauro", "julieta": "julieta", "mauro": "mauro"}
     assert _canonicalize_responsible("mamá", aliases) == "julieta"
     assert _canonicalize_responsible("Papa", aliases) == "mauro"
+
+
+def test_extract_time_range_handles_hs_and_dash_variants():
+    assert _extract_time_range("Sábado 18 de abril de 14hs a 18hs") == ("14:00", "18:00")
+    assert _extract_time_range("Evento 9:30-11:15 en el club") == ("09:30", "11:15")
+
+
+def test_minutes_between_returns_positive_duration():
+    assert _minutes_between("14:00", "18:00") == 240
+    assert _minutes_between("18:00", "14:00") == 60
