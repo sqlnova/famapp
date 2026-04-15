@@ -5,16 +5,17 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
+from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from agents.schedule.calendar_client import AR_TZ, delete_event, list_upcoming_events, update_event
+from agents.schedule.calendar_client import AR_TZ, create_event, delete_event, list_upcoming_events, update_event
 from agents.logistics.maps_client import get_travel_time
 from core.config import get_settings
-from core.models import ShoppingItem
+from core.models import CalendarEvent, ShoppingItem
 from core.supabase_client import (
     add_shopping_item,
     delete_known_place,
@@ -24,6 +25,7 @@ from core.supabase_client import (
     get_pending_shopping_items,
     get_supabase,
     list_family_routines,
+    resolve_place_address,
     mark_shopping_item_done,
     upsert_family_routine,
     upsert_known_place,
@@ -60,6 +62,45 @@ def _infer_user_nickname(user: Any) -> Optional[str]:
         if nick and (local == nick or local.startswith(f"{nick}.") or local.endswith(f".{nick}")):
             return nick
     return None
+
+
+def _to_hhmm(raw: Optional[str], default: str) -> str:
+    text = (raw or "").strip().lower().replace(".", ":")
+    if not text:
+        return default
+    if text.endswith("hs"):
+        text = text[:-2].strip()
+    if ":" not in text:
+        text = f"{text}:00"
+    hh, mm = (text.split(":", 1) + ["00"])[:2]
+    return f"{int(hh):02d}:{int(mm):02d}"
+
+
+def _to_byday(days: List[str]) -> List[str]:
+    mapping = {
+        "lun": "MO", "lunes": "MO", "mo": "MO",
+        "mar": "TU", "martes": "TU", "tu": "TU",
+        "mie": "WE", "mié": "WE", "miercoles": "WE", "miércoles": "WE", "we": "WE",
+        "jue": "TH", "jueves": "TH", "th": "TH",
+        "vie": "FR", "viernes": "FR", "fr": "FR",
+        "sab": "SA", "sáb": "SA", "sabado": "SA", "sábado": "SA", "sa": "SA",
+        "dom": "SU", "domingo": "SU", "su": "SU",
+    }
+    out: List[str] = []
+    for d in days:
+        key = (d or "").strip().lower()
+        val = mapping.get(key)
+        if val and val not in out:
+            out.append(val)
+    return out
+
+
+def _rrule_weekly(days: List[str]) -> Optional[str]:
+    byday = _to_byday(days)
+    if not byday:
+        return None
+    until = datetime.now(AR_TZ).replace(month=12, day=31, hour=23, minute=59, second=59).astimezone(timezone.utc)
+    return f"RRULE:FREQ=WEEKLY;BYDAY={','.join(byday)};UNTIL={until.strftime('%Y%m%dT%H%M%SZ')}"
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -397,7 +438,29 @@ async def delete_task(task_id: UUID, user=Depends(require_auth)):
 @router.get("/api/places")
 async def api_places(user=Depends(require_auth)):
     places = get_all_known_places()
-    return [{"alias": p.alias, "name": p.name, "address": p.address, "type": p.place_type or "general"} for p in places]
+    rows = [{"alias": p.alias, "name": p.name, "address": p.address, "type": p.place_type or "general"} for p in places]
+    if rows:
+        return rows
+
+    # Fallback: if known_places is empty, expose places referenced by routines
+    routines = list_family_routines()
+    derived = []
+    seen = set()
+    for r in routines:
+        alias = (r.place_alias or r.place_name or "").strip().lower()
+        name = (r.place_name or r.place_alias or "").strip()
+        if not alias or alias in seen:
+            continue
+        seen.add(alias)
+        derived.append(
+            {
+                "alias": alias,
+                "name": name or alias,
+                "address": "",
+                "type": "general",
+            }
+        )
+    return derived
 
 
 @router.post("/api/places")
@@ -430,6 +493,7 @@ async def api_routines(user=Depends(require_auth)):
             "id": str(r.id),
             "title": r.title,
             "days": r.days,
+            "children": r.children or [],
             "outbound_time": r.outbound_time,
             "return_time": r.return_time,
             "outbound_responsible": r.outbound_responsible,
@@ -444,10 +508,12 @@ async def api_routines(user=Depends(require_auth)):
 
 @router.post("/api/routines")
 async def api_save_routine(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    is_new = not payload.get("id")
     clean_payload = {
-        "id": payload.get("id"),
+        "id": payload.get("id") or str(uuid4()),
         "title": (payload.get("title") or "Nueva rutina").strip(),
         "days": payload.get("days") or [],
+        "children": payload.get("children") or [],
         "outbound_time": payload.get("outbound_time") or None,
         "return_time": payload.get("return_time") or None,
         "outbound_responsible": payload.get("outbound_responsible") or None,
@@ -457,13 +523,78 @@ async def api_save_routine(payload: Dict[str, Any] = Body(...), user=Depends(req
         "is_active": payload.get("is_active", True),
         "updated_at": datetime.now(tz=timezone.utc).isoformat(),
     }
-    if not clean_payload["id"]:
-        clean_payload.pop("id")
-    routine = upsert_family_routine(clean_payload)
+    try:
+        routine = upsert_family_routine(clean_payload)
+    except Exception as first_error:
+        logger.warning("routine_upsert_full_failed", error=str(first_error))
+        # Backward-compatible fallback for older DB schemas missing newer columns.
+        fallback_payload = {
+            "id": clean_payload["id"],
+            "title": clean_payload["title"],
+            "days": clean_payload["days"],
+            "outbound_time": clean_payload["outbound_time"],
+            "return_time": clean_payload["return_time"],
+            "outbound_responsible": clean_payload["outbound_responsible"],
+            "return_responsible": clean_payload["return_responsible"],
+            "place_alias": clean_payload["place_alias"],
+            "place_name": clean_payload["place_name"],
+            "is_active": clean_payload["is_active"],
+        }
+        try:
+            routine = upsert_family_routine(fallback_payload)
+        except Exception as second_error:
+            logger.exception("routine_upsert_fallback_failed")
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No se pudo guardar la rutina. "
+                    "Revisá formato de horas (HH:MM), días y configuración de base de datos."
+                ),
+            ) from second_error
+
+    if is_new:
+        try:
+            rrule = _rrule_weekly(routine.days)
+            if rrule:
+                place_label = routine.place_name or routine.place_alias or "actividad"
+                known_places = {p.alias: p for p in get_all_known_places()}
+                location = resolve_place_address(routine.place_alias or routine.place_name or "", known_places) or routine.place_name
+                children = routine.children or []
+                people = ", ".join(children) if children else "los chicos"
+                start_date = datetime.now(AR_TZ).strftime("%Y-%m-%d")
+
+                if routine.outbound_time:
+                    t0 = _to_hhmm(routine.outbound_time, "07:30")
+                    start0 = AR_TZ.localize(datetime.fromisoformat(f"{start_date}T{t0}:00"))
+                    event0 = CalendarEvent(
+                        title=f"Llevar a {people} al {place_label}",
+                        start=start0,
+                        end=start0 + timedelta(minutes=15),
+                        location=location,
+                        responsible_nickname=routine.outbound_responsible,
+                        children=children,
+                    )
+                    create_event(event0, recurrence=[rrule])
+                if routine.return_time:
+                    t1 = _to_hhmm(routine.return_time, "12:00")
+                    start1 = AR_TZ.localize(datetime.fromisoformat(f"{start_date}T{t1}:00"))
+                    event1 = CalendarEvent(
+                        title=f"Buscar a {people} del {place_label}",
+                        start=start1,
+                        end=start1 + timedelta(minutes=15),
+                        location=location,
+                        responsible_nickname=routine.return_responsible,
+                        children=children,
+                    )
+                    create_event(event1, recurrence=[rrule])
+        except Exception:
+            logger.exception("routine_mirror_events_failed")
+
     return {
         "id": str(routine.id),
         "title": routine.title,
         "days": routine.days,
+        "children": routine.children or [],
         "outbound_time": routine.outbound_time,
         "return_time": routine.return_time,
         "outbound_responsible": routine.outbound_responsible,
