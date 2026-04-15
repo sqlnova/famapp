@@ -49,6 +49,127 @@ def _allow_local_fallback() -> bool:
     return not get_settings().is_production
 
 
+def _list_places_from_tasks_store() -> List[Dict[str, Any]]:
+    """Durable fallback storage backed by Supabase `tasks` table."""
+    client = get_supabase()
+    result = (
+        client.table("tasks")
+        .select("payload,status,triggered_by,created_at")
+        .eq("agent", "known_place")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    dedup: Dict[str, Dict[str, Any]] = {}
+    for row in result.data:
+        alias = (row.get("triggered_by") or "").strip().lower()
+        if not alias or alias in dedup:
+            continue
+        if row.get("status") == "cancelled":
+            dedup[alias] = {}
+            continue
+        payload = row.get("payload") or {}
+        dedup[alias] = {
+            "alias": alias,
+            "name": payload.get("name") or alias,
+            "address": payload.get("address") or "",
+            "type": payload.get("type") or "general",
+        }
+    return [v for v in dedup.values() if v]
+
+
+def _save_place_to_tasks_store(alias: str, name: str, address: str, place_type: str) -> Dict[str, Any]:
+    client = get_supabase()
+    clean = {
+        "alias": (alias or "").strip().lower(),
+        "name": (name or "").strip(),
+        "address": (address or "").strip(),
+        "type": (place_type or "general").strip().lower() or "general",
+    }
+    client.table("tasks").insert(
+        {
+            "agent": "known_place",
+            "status": "done",
+            "triggered_by": clean["alias"],
+            "payload": clean,
+        }
+    ).execute()
+    return clean
+
+
+def _delete_place_from_tasks_store(alias: str) -> bool:
+    key = (alias or "").strip().lower()
+    if not key:
+        return False
+    client = get_supabase()
+    client.table("tasks").insert(
+        {
+            "agent": "known_place",
+            "status": "cancelled",
+            "triggered_by": key,
+            "payload": {"alias": key},
+        }
+    ).execute()
+    return True
+
+
+def _list_routines_from_tasks_store() -> List[Dict[str, Any]]:
+    client = get_supabase()
+    result = (
+        client.table("tasks")
+        .select("payload,triggered_by,created_at")
+        .eq("agent", "family_routine")
+        .eq("status", "done")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    dedup: Dict[str, Dict[str, Any]] = {}
+    for row in result.data:
+        rid = str(row.get("triggered_by") or "").strip()
+        if not rid or rid in dedup:
+            continue
+        payload = row.get("payload") or {}
+        dedup[rid] = {
+            "id": rid,
+            "title": payload.get("title") or "Nueva rutina",
+            "days": payload.get("days") or [],
+            "children": payload.get("children") or [],
+            "outbound_time": payload.get("outbound_time"),
+            "return_time": payload.get("return_time"),
+            "outbound_responsible": payload.get("outbound_responsible"),
+            "return_responsible": payload.get("return_responsible"),
+            "place_alias": payload.get("place_alias"),
+            "place_name": payload.get("place_name"),
+            "is_active": bool(payload.get("is_active", True)),
+        }
+    return list(dedup.values())
+
+
+def _save_routine_to_tasks_store(clean_payload: Dict[str, Any]) -> Dict[str, Any]:
+    client = get_supabase()
+    rid = str(clean_payload["id"])
+    client.table("tasks").insert(
+        {
+            "agent": "family_routine",
+            "status": "done",
+            "triggered_by": rid,
+            "payload": clean_payload,
+        }
+    ).execute()
+    return {
+        "id": rid,
+        "title": clean_payload["title"],
+        "days": clean_payload["days"],
+        "children": clean_payload["children"],
+        "outbound_time": clean_payload["outbound_time"],
+        "return_time": clean_payload["return_time"],
+        "outbound_responsible": clean_payload["outbound_responsible"],
+        "return_responsible": clean_payload["return_responsible"],
+        "place_alias": clean_payload["place_alias"],
+        "place_name": clean_payload["place_name"],
+        "is_active": clean_payload["is_active"],
+    }
+
+
 def _suggest_departure(start: datetime, location: Optional[str]) -> str:
     """Suggest departure time using Maps traffic when available, fallback to -30m."""
     minutes_before = 30
@@ -455,14 +576,25 @@ async def api_places(user=Depends(require_auth)):
         rows = [{"alias": p.alias, "name": p.name, "address": p.address, "type": p.place_type or "general"} for p in places]
     except Exception as error:
         logger.warning("places_db_read_failed", error=str(error))
-        if not _allow_local_fallback():
-            raise HTTPException(status_code=503, detail="No se pudo leer lugares desde la base de datos.")
+        try:
+            rows = _list_places_from_tasks_store()
+        except Exception as fallback_error:
+            logger.warning("places_tasks_fallback_read_failed", error=str(fallback_error))
+            if not _allow_local_fallback():
+                raise HTTPException(status_code=503, detail="No se pudo leer lugares desde la base de datos.")
 
     if _allow_local_fallback():
         local_rows = local_list_places()
         if local_rows:
             seen = {(r["alias"] or "").lower() for r in rows}
             rows.extend([r for r in local_rows if (r.get("alias") or "").lower() not in seen])
+    try:
+        tasks_rows = _list_places_from_tasks_store()
+        if tasks_rows:
+            seen = {(r["alias"] or "").lower() for r in rows}
+            rows.extend([r for r in tasks_rows if (r.get("alias") or "").lower() not in seen])
+    except Exception:
+        logger.debug("places_tasks_fallback_merge_skipped")
     if rows:
         return rows
 
@@ -503,10 +635,15 @@ async def save_place(
         return {"alias": place.alias, "name": place.name, "address": place.address, "type": place.place_type}
     except Exception as error:
         logger.warning("places_db_write_failed", error=str(error))
-        if _allow_local_fallback():
-            logger.warning("places_db_write_fallback_local_enabled")
-            return local_save_place({"alias": alias, "name": name, "address": address, "type": place_type})
-        raise HTTPException(status_code=503, detail="No se pudo guardar el lugar en la base de datos.")
+        try:
+            logger.warning("places_db_write_using_tasks_fallback")
+            return _save_place_to_tasks_store(alias, name, address, place_type)
+        except Exception as fallback_error:
+            logger.warning("places_tasks_fallback_write_failed", error=str(fallback_error))
+            if _allow_local_fallback():
+                logger.warning("places_db_write_fallback_local_enabled")
+                return local_save_place({"alias": alias, "name": name, "address": address, "type": place_type})
+            raise HTTPException(status_code=503, detail="No se pudo guardar el lugar en la base de datos.")
 
 
 @router.delete("/api/places/{alias}")
@@ -515,6 +652,11 @@ async def remove_place(alias: str, user=Depends(require_auth)):
         deleted = delete_known_place(alias)
     except Exception:
         deleted = False
+    if not deleted:
+        try:
+            deleted = _delete_place_from_tasks_store(alias)
+        except Exception:
+            deleted = False
     local_deleted = local_delete_place(alias)
     if not deleted and not local_deleted:
         raise HTTPException(status_code=404, detail="Lugar no encontrado")
@@ -530,8 +672,18 @@ async def api_routines(user=Depends(require_auth)):
         routines = list_family_routines()
     except Exception as error:
         logger.warning("routines_db_read_failed", error=str(error))
-        if not _allow_local_fallback():
-            raise HTTPException(status_code=503, detail="No se pudo leer rutinas desde la base de datos.")
+        try:
+            rows = _list_routines_from_tasks_store()
+            if _allow_local_fallback():
+                local_rows = local_list_routines()
+                if local_rows:
+                    seen = {str(r["id"]) for r in rows}
+                    rows.extend([r for r in local_rows if str(r.get("id")) not in seen])
+            return rows
+        except Exception as fallback_error:
+            logger.warning("routines_tasks_fallback_read_failed", error=str(fallback_error))
+            if not _allow_local_fallback():
+                raise HTTPException(status_code=503, detail="No se pudo leer rutinas desde la base de datos.")
     rows = [
         {
             "id": str(r.id),
@@ -553,6 +705,13 @@ async def api_routines(user=Depends(require_auth)):
         if local_rows:
             seen = {str(r["id"]) for r in rows}
             rows.extend([r for r in local_rows if str(r.get("id")) not in seen])
+    try:
+        tasks_rows = _list_routines_from_tasks_store()
+        if tasks_rows:
+            seen = {str(r["id"]) for r in rows}
+            rows.extend([r for r in tasks_rows if str(r.get("id")) not in seen])
+    except Exception:
+        logger.debug("routines_tasks_fallback_merge_skipped")
     return rows
 
 
@@ -621,11 +780,16 @@ async def api_save_routine(payload: Dict[str, Any] = Body(...), user=Depends(req
             }
         except Exception as second_error:
             logger.warning("routine_upsert_fallback_failed", error=str(second_error))
-            if _allow_local_fallback():
-                logger.warning("routine_upsert_local_fallback_enabled")
-                routine_obj = local_save_routine(clean_payload)
-            else:
-                raise HTTPException(status_code=503, detail="No se pudo guardar la rutina en la base de datos.")
+            try:
+                logger.warning("routine_upsert_using_tasks_fallback")
+                routine_obj = _save_routine_to_tasks_store(clean_payload)
+            except Exception as fallback_error:
+                logger.warning("routine_tasks_fallback_write_failed", error=str(fallback_error))
+                if _allow_local_fallback():
+                    logger.warning("routine_upsert_local_fallback_enabled")
+                    routine_obj = local_save_routine(clean_payload)
+                else:
+                    raise HTTPException(status_code=503, detail="No se pudo guardar la rutina en la base de datos.")
 
     if is_new:
         try:
