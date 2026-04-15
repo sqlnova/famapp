@@ -258,6 +258,49 @@
             <button @click="cancelEvent" class="flex-1 bg-slate-100 rounded-2xl py-2.5 text-sm">Cancelar</button>
           </div>
         </div>
+
+        <!-- Task Suggestions Modal -->
+        <div x-show="showTaskSuggestions" class="fixed inset-0 z-50 bg-black/30 flex items-end">
+          <div class="w-full bg-white rounded-t-3xl p-4 space-y-3 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-semibold text-lg">Tareas sugeridas para este evento</h3>
+              <button @click="cancelSuggestions" class="text-slate-400 text-2xl">✕</button>
+            </div>
+
+            <p class="text-sm text-slate-600 mb-4">Selecciona las tareas que quieres crear:</p>
+
+            <template x-for="(task, idx) in suggestedTasks" :key="`suggestion-${idx}`">
+              <div class="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <input
+                  type="checkbox"
+                  @change="toggleSuggestion(idx)"
+                  x-model="suggestedTasks[idx].selected"
+                  class="mt-1 w-5 h-5 rounded accent-iosBlue cursor-pointer"
+                >
+                <div class="flex-1">
+                  <p class="font-medium text-sm" x-text="task.title"></p>
+                  <p class="text-xs text-slate-500" x-text="task.description" x-show="task.description"></p>
+                </div>
+              </div>
+            </template>
+
+            <div class="flex gap-2 pt-4 border-t border-slate-100">
+              <button
+                @click="cancelSuggestions"
+                class="flex-1 bg-slate-100 text-slate-700 rounded-2xl py-3 text-sm font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                @click="createSuggestedTasks"
+                :disabled="!suggestedTasks.some(t => t.selected)"
+                class="flex-1 bg-iosBlue text-white rounded-2xl py-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Crear <span x-text="suggestedTasks.filter(t => t.selected).length"></span> tarea(s)
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section x-show="view==='shopping'" class="space-y-3">
@@ -484,6 +527,9 @@
         eventForm: { id: '', recurring_event_id: '', title: '', start: '', end: '', location: '', responsible_nickname: '', childrenInput: '', apply_to_series: false },
         showRoutineForm: false,
         routineForm: { id: null, title: '', daysInput: '', childrenInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' },
+        showTaskSuggestions: false,
+        suggestedTasks: [],
+        selectedSuggestions: [],
 
         async init() {
           this.selectedAgendaDate = this.toDateKey(new Date())
@@ -681,7 +727,63 @@
           }
           await this.api(`/events/${this.eventForm.id}`, { method: 'PUT', body: JSON.stringify(payload) })
           this.showEventForm = false
+
+          // Fetch task suggestions based on the event
+          await this.suggestTasksForEvent(payload)
+
+          // If no suggestions, reload and finish
+          if (this.suggestedTasks.length === 0) {
+            await this.loadData()
+          }
+          // Otherwise, the modal stays open for user to select tasks
+        },
+
+        async suggestTasksForEvent(eventPayload) {
+          const suggestions = await this.api('/tasks/suggestions', {
+            method: 'POST',
+            body: JSON.stringify(eventPayload)
+          })
+
+          if (suggestions && suggestions.suggestions && suggestions.suggestions.length > 0) {
+            this.suggestedTasks = suggestions.suggestions.map((s, idx) => ({
+              ...s,
+              id: idx,
+              selected: false
+            }))
+            this.selectedSuggestions = []
+            this.showTaskSuggestions = true
+          }
+        },
+
+        toggleSuggestion(idx) {
+          this.suggestedTasks[idx].selected = !this.suggestedTasks[idx].selected
+        },
+
+        async createSuggestedTasks() {
+          const tasksToCreate = this.suggestedTasks.filter(t => t.selected)
+
+          for (const task of tasksToCreate) {
+            await this.api('/tasks', {
+              method: 'POST',
+              body: JSON.stringify({
+                title: task.title,
+                assignee: '',
+                due_date: '',
+                notes: task.description || ''
+              })
+            })
+          }
+
+          this.showTaskSuggestions = false
+          this.suggestedTasks = []
+          this.selectedSuggestions = []
           await this.loadData()
+        },
+
+        cancelSuggestions() {
+          this.showTaskSuggestions = false
+          this.suggestedTasks = []
+          this.selectedSuggestions = []
         },
 
         async deleteEvent(event) {
@@ -995,19 +1097,24 @@
         todaysRoutineActions() {
           const mine = this.myNickname()
           const actions = []
+          // Only show routines where the current user is responsible
+          if (!mine) return actions  // No user nickname, can't filter
+
           this.todaysRoutines().forEach((r) => {
             const children = (r.children || []).join(' y ') || 'los chicos'
             const place = r.place_name || r.place_alias || 'actividad'
             const outResp = (r.outbound_responsible || '').toLowerCase()
             const retResp = (r.return_responsible || '').toLowerCase()
-            if (!mine || mine === outResp) {
+
+            // Only add if user is the responsible for this action
+            if (mine === outResp && r.outbound_time) {
               actions.push({
                 key: `${r.id}-out`,
                 time: r.outbound_time || '--:--',
                 text: `Llevar a ${children} a ${place}`,
               })
             }
-            if (!mine || mine === retResp) {
+            if (mine === retResp && r.return_time) {
               actions.push({
                 key: `${r.id}-ret`,
                 time: r.return_time || '--:--',
@@ -1019,7 +1126,9 @@
         },
 
         nextDepartureLabel() {
-          const event = this.filteredAgenda().find((e) => new Date(e.start) > new Date() && e.suggested_departure)
+          const now = new Date()
+          // Only show departure time if user is responsible for an event (has suggested_departure)
+          const event = this.filteredAgenda().find((e) => new Date(e.start) > now && e.suggested_departure)
           return event ? this.fmtTime(event.suggested_departure) : 'Sin salidas asignadas'
         },
 

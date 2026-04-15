@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 
 from agents.schedule.calendar_client import AR_TZ, create_event, delete_event, list_upcoming_events, update_event
 from agents.logistics.maps_client import get_travel_time
+from agents.tasks.suggestions import generate_task_suggestions, filter_duplicate_suggestions
 from core.config import get_settings
 from core.models import CalendarEvent, ShoppingItem
 from server.local_store import (
@@ -592,6 +593,19 @@ async def delete_task(task_id: UUID, user=Depends(require_auth)):
     client = get_supabase()
     client.table("tasks").update({"status": "cancelled"}).eq("id", str(task_id)).eq("agent", "family_task").execute()
     return {"ok": True}
+
+
+@router.post("/api/tasks/suggestions")
+async def suggest_tasks(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    """Generate task suggestions based on an event's characteristics.
+
+    Expects: event object with title, location, start, etc.
+    Returns: list of suggested tasks that could help prepare for the event
+    """
+    event = CalendarEvent(**payload)
+    suggestions = generate_task_suggestions(event)
+    suggestions = filter_duplicate_suggestions(suggestions)
+    return {"suggestions": suggestions}
 
 
 # ── Places ────────────────────────────────────────────────────────────────────
