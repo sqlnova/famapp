@@ -280,6 +280,10 @@
                 <div class="flex-1">
                   <p class="font-medium text-sm" x-text="task.title"></p>
                   <p class="text-xs text-slate-500" x-text="task.description" x-show="task.description"></p>
+                  <div class="flex gap-3 text-xs text-slate-400 mt-1" x-show="task.due_date || task.assignee">
+                    <span x-show="task.due_date">📅 <span x-text="new Date(task.due_date).toLocaleDateString('es-AR')"></span></span>
+                    <span x-show="task.assignee">👤 <span x-text="task.assignee"></span></span>
+                  </div>
                 </div>
               </div>
             </template>
@@ -767,8 +771,8 @@
               method: 'POST',
               body: JSON.stringify({
                 title: task.title,
-                assignee: '',
-                due_date: '',
+                assignee: task.assignee || '',
+                due_date: task.due_date || '',
                 notes: task.description || ''
               })
             })
