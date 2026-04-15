@@ -236,6 +236,34 @@ def _rrule_weekly(days: List[str]) -> Optional[str]:
     return f"RRULE:FREQ=WEEKLY;BYDAY={','.join(byday)};UNTIL={until.strftime('%Y%m%dT%H%M%SZ')}"
 
 
+def _get_next_occurrence_date(days: List[str]) -> str:
+    """Find the next date that matches one of the specified days of week.
+
+    Args:
+        days: List of day names (e.g., ["lunes", "jueves"])
+
+    Returns:
+        ISO date string for the next matching date
+    """
+    byday = _to_byday(days)
+    if not byday:
+        return datetime.now(AR_TZ).strftime("%Y-%m-%d")
+
+    # Map RRULE day codes to Python weekday (0=Monday, 6=Sunday)
+    day_map = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
+    target_weekdays = {day_map[code] for code in byday if code in day_map}
+
+    # Start from today and find the next matching day
+    current = datetime.now(AR_TZ)
+    for _ in range(7):  # Check up to 7 days
+        if current.weekday() in target_weekdays:
+            return current.strftime("%Y-%m-%d")
+        current += timedelta(days=1)
+
+    # Fallback to today if nothing found (shouldn't happen with valid input)
+    return datetime.now(AR_TZ).strftime("%Y-%m-%d")
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 async def require_auth(authorization: Optional[str] = Header(None)):
@@ -718,10 +746,21 @@ async def api_routines(user=Depends(require_auth)):
 @router.post("/api/routines")
 async def api_save_routine(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
     is_new = not payload.get("id")
+
+    # Validate required fields
+    title = (payload.get("title") or "Nueva rutina").strip()
+    days = payload.get("days") or []
+
+    if not days:
+        raise HTTPException(status_code=400, detail="Debe seleccionar al menos un día de la semana")
+
+    if is_new and not (payload.get("outbound_time") or payload.get("return_time")):
+        raise HTTPException(status_code=400, detail="Debe especificar hora de ida o vuelta")
+
     clean_payload = {
         "id": payload.get("id") or str(uuid4()),
-        "title": (payload.get("title") or "Nueva rutina").strip(),
-        "days": payload.get("days") or [],
+        "title": title,
+        "days": days,
         "children": payload.get("children") or [],
         "outbound_time": payload.get("outbound_time") or None,
         "return_time": payload.get("return_time") or None,
@@ -800,7 +839,9 @@ async def api_save_routine(payload: Dict[str, Any] = Body(...), user=Depends(req
                 location = resolve_place_address(routine_obj["place_alias"] or routine_obj["place_name"] or "", known_places) or routine_obj["place_name"]
                 children = routine_obj["children"] or []
                 people = ", ".join(children) if children else "los chicos"
-                start_date = datetime.now(AR_TZ).strftime("%Y-%m-%d")
+
+                # Calculate start_date as the next occurrence of the scheduled days
+                start_date = _get_next_occurrence_date(routine_obj["days"])
 
                 if routine_obj["outbound_time"]:
                     t0 = _to_hhmm(routine_obj["outbound_time"], "07:30")
