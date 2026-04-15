@@ -1025,17 +1025,9 @@
 
         nextDepartureLabel() {
           const now = new Date()
-          // First, look for an event with a calculated suggested_departure (when user is responsible)
+          // Only show departure time if user is responsible for an event (has suggested_departure)
           const event = this.filteredAgenda().find((e) => new Date(e.start) > now && e.suggested_departure)
-          if (event) return this.fmtTime(event.suggested_departure)
-
-          // Fallback: if no specific departure time, show approximate time 30 min before first event
-          const nextEvent = this.filteredAgenda().find((e) => new Date(e.start) > now)
-          if (nextEvent) {
-            const approxDeparture = new Date(new Date(nextEvent.start).getTime() - 30 * 60 * 1000)
-            return this.fmtTime(approxDeparture.toISOString()) + ' (aprox.)'
-          }
-          return 'Sin salidas asignadas'
+          return event ? this.fmtTime(event.suggested_departure) : 'Sin salidas asignadas'
         },
 
         suggestDeparture(startIso) {
