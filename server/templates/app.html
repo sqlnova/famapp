@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="FamApp">
+  <meta name="theme-color" content="#f4f5f7">
+  <link rel="icon" type="image/png" sizes="512x512" href="/app/static/icons/famapp-logo.png">
+  <link rel="icon" type="image/svg+xml" href="/app/static/icons/famapp-logo.svg">
+  <link rel="shortcut icon" href="/app/static/icons/famapp-logo.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="/app/static/icons/famapp-logo.png">
+  <link rel="manifest" href="/app/static/manifest.webmanifest">
   <title>FamApp · Privada</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -89,12 +96,12 @@
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
           <div class="flex items-center justify-between mb-2">
             <h3 class="font-medium">Rutinas de hoy</h3>
-            <span class="text-xs text-iosBlue" x-text="todaysRoutines().length"></span>
+            <span class="text-xs text-iosBlue" x-text="todaysRoutineActions().length"></span>
           </div>
-          <template x-for="routine in todaysRoutines()" :key="routine.id">
-            <p class="text-sm py-1">• <span x-text="routine.title"></span></p>
+          <template x-for="action in todaysRoutineActions()" :key="action.key">
+            <p class="text-sm py-1">• <span class="font-medium" x-text="action.time"></span> — <span x-text="action.text"></span></p>
           </template>
-          <p x-show="todaysRoutines().length===0" class="text-sm text-slate-400">No hay rutinas activas para hoy.</p>
+          <p x-show="todaysRoutineActions().length===0" class="text-sm text-slate-400">No hay rutinas activas para hoy.</p>
         </div>
 
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
@@ -102,17 +109,6 @@
             <h3 class="font-medium">Tareas por miembro</h3>
             <span class="text-xs text-iosBlue">Hoy</span>
           </div>
-          <div class="grid grid-cols-12 gap-2 mb-3">
-            <input x-model="newTask.title" placeholder="Nueva tarea (ej: comprar regalo)" class="col-span-6 rounded-xl border border-slate-200 px-3 py-2 text-sm">
-            <select x-model="newTask.assignee" class="col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm">
-              <option value="">Sin asignar</option>
-              <template x-for="m in family" :key="`task-opt-${m.id}`">
-                <option :value="m.nickname" x-text="m.name"></option>
-              </template>
-            </select>
-            <input x-model="newTask.due_date" type="date" class="col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm">
-          </div>
-          <button @click="addTask" class="w-full mb-3 bg-iosBlue text-white rounded-2xl py-2 text-sm">Agregar tarea</button>
           <template x-for="m in family" :key="`task-${m.id}`">
             <div class="mb-2">
               <p class="text-sm font-medium" x-text="m.name"></p>
@@ -126,19 +122,38 @@
             </div>
           </template>
           <p x-show="family.length===0" class="text-sm text-slate-400">Cargá miembros para ver tareas asignadas.</p>
+          <div class="mt-4 pt-3 border-t border-slate-100 space-y-2">
+            <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Agregar tarea manual</p>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
+              <input x-model="newTask.title" placeholder="Nueva tarea (ej: comprar regalo)" class="sm:col-span-6 rounded-xl border border-slate-200 px-3 py-2 text-sm w-full">
+              <select x-model="newTask.assignee" class="sm:col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm w-full">
+                <option value="">Sin asignar</option>
+                <template x-for="m in family" :key="`task-opt-${m.id}`">
+                  <option :value="m.nickname" x-text="m.name"></option>
+                </template>
+              </select>
+              <input x-model="newTask.due_date" type="date" class="sm:col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm w-full">
+            </div>
+            <button @click="addTask" class="w-full bg-iosBlue text-white rounded-2xl py-2 text-sm">Agregar tarea</button>
+          </div>
         </div>
       </section>
 
       <section x-show="view==='agenda'" class="space-y-3">
         <div class="bg-white rounded-3xl p-1 border border-slate-100 inline-flex w-full">
-          <template x-for="tab in ['hoy','semana','mes']" :key="tab">
-            <button @click="agendaFilter=tab" class="flex-1 py-2 rounded-2xl text-sm capitalize"
-              :class="agendaFilter===tab ? 'bg-iosBlue text-white' : 'text-slate-500'" x-text="tab"></button>
+          <template x-for="tab in agendaTabs" :key="tab.value">
+            <button @click="agendaFilter=tab.value" class="flex-1 py-2 rounded-2xl text-sm capitalize"
+              :class="agendaFilter===tab.value ? 'bg-iosBlue text-white' : 'text-slate-500'" x-text="tab.label"></button>
           </template>
         </div>
 
         <template x-if="agendaFilter==='hoy'">
           <div class="space-y-3">
+            <div class="bg-white rounded-3xl p-3 border border-slate-100 flex items-center justify-between">
+              <button @click="shiftSelectedDay(-1)" class="text-iosBlue text-sm px-2 py-1 rounded-lg bg-slate-50">← Día anterior</button>
+              <p class="text-sm font-medium" x-text="selectedDateLabel()"></p>
+              <button @click="shiftSelectedDay(1)" class="text-iosBlue text-sm px-2 py-1 rounded-lg bg-slate-50">Día siguiente →</button>
+            </div>
             <template x-for="event in filteredAgenda()" :key="event.id + event.start">
               <article class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
                 <div class="flex justify-between items-start gap-2">
@@ -165,18 +180,40 @@
               </article>
             </template>
             <p x-show="filteredAgenda().length===0" class="text-sm text-slate-400">No hay eventos para este día.</p>
+            <div x-show="filteredAgenda().length===0 && upcomingEvents().length>0" class="bg-white rounded-3xl p-3 border border-slate-100 space-y-2">
+              <div class="flex items-center justify-between">
+                <p class="text-sm font-medium">Próximos eventos</p>
+                <button @click="jumpToNextEvent()" class="text-xs text-iosBlue">Ir al próximo</button>
+              </div>
+              <template x-for="event in upcomingEvents(3)" :key="`upcoming-${event.id}-${event.start}`">
+                <p class="text-xs text-slate-600">
+                  <span class="font-medium" x-text="fmtAgendaDate(event.start)"></span> ·
+                  <span x-text="event.title"></span>
+                </p>
+              </template>
+            </div>
           </div>
         </template>
 
         <template x-if="agendaFilter==='semana'">
           <div class="bg-white rounded-3xl p-3 border border-slate-100">
-            <div class="grid grid-cols-7 gap-2">
+            <div class="grid grid-cols-1 sm:grid-cols-7 gap-2">
               <template x-for="day in weekDays()" :key="day.key">
-                <button @click="openDay(day.date)" class="rounded-2xl border p-2 text-left min-h-24"
+                <button @click="openDay(day.date)" class="rounded-2xl border p-3 text-left min-h-28 w-full"
                   :class="day.isToday ? 'border-iosBlue bg-iosBlue/5' : 'border-slate-200'">
-                  <p class="text-[11px] text-slate-500" x-text="day.weekday"></p>
-                  <p class="font-semibold text-sm" x-text="day.day"></p>
+                  <div class="flex items-center justify-between sm:block">
+                    <p class="text-[11px] text-slate-500" x-text="day.weekday"></p>
+                    <p class="font-semibold text-sm" x-text="day.day"></p>
+                  </div>
                   <p class="text-[11px] text-iosBlue mt-1" x-text="`${day.events.length} tareas`"></p>
+                  <div class="mt-2 space-y-1">
+                    <template x-for="event in day.events.slice(0,3)" :key="`${day.key}-${event.id || event.start}`">
+                      <p class="text-[11px] text-slate-600 truncate">
+                        <span class="font-medium" x-text="fmtTime(event.start)"></span>
+                        <span x-text="event.title"></span>
+                      </p>
+                    </template>
+                  </div>
                 </button>
               </template>
             </div>
@@ -260,7 +297,10 @@
 
       <section x-show="view==='routines'" class="space-y-3">
         <div class="flex justify-between items-center">
-          <h3 class="text-lg font-semibold">Rutinas</h3>
+          <div>
+            <h3 class="text-lg font-semibold">Rutinas</h3>
+            <p class="text-xs text-slate-500">Cargá traslados repetidos (ida/vuelta) como colegio, club o terapia.</p>
+          </div>
           <button @click="startRoutine()" class="text-sm text-iosBlue">Nueva rutina</button>
         </div>
 
@@ -277,6 +317,7 @@
               <p>Ida: <span x-text="routine.outbound_time || '-' "></span> · <span x-text="routine.outbound_responsible || '-' "></span></p>
               <p>Vuelta: <span x-text="routine.return_time || '-' "></span> · <span x-text="routine.return_responsible || '-' "></span></p>
             </div>
+            <p class="mt-2 text-sm text-slate-500">Hijos: <span x-text="(routine.children || []).join(', ') || '-' "></span></p>
             <p class="mt-2 text-sm text-slate-500">Lugar: <span x-text="routine.place_name || routine.place_alias || '-' "></span></p>
           </article>
         </template>
@@ -285,18 +326,36 @@
         <div x-show="showRoutineForm" class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
           <input x-model="routineForm.title" placeholder="Giuseppe y Gaetano · Colegio" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <input x-model="routineForm.daysInput" placeholder="Lun,Mar,Mie,Jue,Vie" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="routineForm.childrenInput" placeholder="Hijos (ej: Giuseppe,Gaetano)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <div class="grid grid-cols-2 gap-2">
             <input x-model="routineForm.outbound_time" placeholder="07:20" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
             <input x-model="routineForm.return_time" placeholder="16:10" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
           </div>
           <div class="grid grid-cols-2 gap-2">
-            <input x-model="routineForm.outbound_responsible" placeholder="Julieta" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
-            <input x-model="routineForm.return_responsible" placeholder="Mauro" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="routineForm.outbound_responsible" placeholder="Responsable de llevar (Mauro)" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="routineForm.return_responsible" placeholder="Responsable de buscar (Julieta)" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
           </div>
           <input x-model="routineForm.place_name" placeholder="Colegio" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <div class="flex gap-2">
             <button @click="saveRoutine" class="flex-1 bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Guardar</button>
             <button @click="cancelRoutine" class="flex-1 bg-slate-100 rounded-2xl py-2.5 text-sm">Cancelar</button>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-medium">Lugares guardados</h4>
+            <span class="text-xs text-iosBlue" x-text="places.length"></span>
+          </div>
+          <template x-for="p in places" :key="p.alias">
+            <p class="text-sm text-slate-600">• <span class="font-medium" x-text="p.name || p.alias"></span> — <span x-text="p.address"></span></p>
+          </template>
+          <p x-show="places.length===0" class="text-sm text-slate-400">Todavía no hay lugares guardados.</p>
+          <div class="pt-2 border-t border-slate-100 grid grid-cols-1 gap-2">
+            <input x-model="newPlace.alias" placeholder="Alias (ej: colegio)" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newPlace.name" placeholder="Nombre (ej: Colegio Don Bosco)" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newPlace.address" placeholder="Dirección completa" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <button @click="savePlace" class="bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Guardar lugar</button>
           </div>
         </div>
       </section>
@@ -389,6 +448,11 @@
           { id: 'routines', icon: '🔁', label: 'Rutinas' },
           { id: 'more', icon: '⚙️', label: 'Más' },
         ],
+        agendaTabs: [
+          { value: 'hoy', label: 'Diaria' },
+          { value: 'semana', label: 'Semana' },
+          { value: 'mes', label: 'Mes' },
+        ],
         agendaFilter: 'hoy',
         selectedAgendaDate: null,
         email: '',
@@ -411,7 +475,7 @@
         showEventForm: false,
         eventForm: { id: '', recurring_event_id: '', title: '', start: '', end: '', location: '', responsible_nickname: '', childrenInput: '', apply_to_series: false },
         showRoutineForm: false,
-        routineForm: { id: null, title: '', daysInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' },
+        routineForm: { id: null, title: '', daysInput: '', childrenInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' },
 
         async init() {
           this.selectedAgendaDate = this.toDateKey(new Date())
@@ -634,7 +698,7 @@
 
         startRoutine() {
           this.showRoutineForm = true
-          this.routineForm = { id: null, title: '', daysInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' }
+          this.routineForm = { id: null, title: '', daysInput: '', childrenInput: '', outbound_time: '', return_time: '', outbound_responsible: '', return_responsible: '', place_name: '', place_alias: '' }
         },
 
         editRoutine(routine) {
@@ -642,6 +706,7 @@
           this.routineForm = {
             ...routine,
             daysInput: (routine.days || []).join(','),
+            childrenInput: (routine.children || []).join(','),
           }
         },
 
@@ -650,12 +715,23 @@
         },
 
         async saveRoutine() {
+          const days = this.normalizeRoutineDays(this.routineForm.daysInput)
+          const children = this.routineForm.childrenInput.split(',').map((c) => c.trim()).filter(Boolean)
+          if (!this.routineForm.title.trim() || days.length === 0 || !this.routineForm.outbound_time || !this.routineForm.return_time || !this.routineForm.outbound_responsible || !this.routineForm.return_responsible || !this.routineForm.place_name || children.length === 0) {
+            window.alert('Completá todos los campos: título, días, horas, responsables, hijos y lugar.')
+            return
+          }
           const payload = {
             ...this.routineForm,
-            days: this.routineForm.daysInput.split(',').map((d) => d.trim()).filter(Boolean),
+            days,
+            children,
             is_active: true,
           }
-          await this.api('/routines', { method: 'POST', body: JSON.stringify(payload) })
+          const saved = await this.api('/routines', { method: 'POST', body: JSON.stringify(payload) })
+          if (!saved) {
+            window.alert('No pude guardar la rutina. Revisá los campos e intentá de nuevo.')
+            return
+          }
           this.showRoutineForm = false
           await this.loadData()
         },
@@ -683,6 +759,22 @@
         openDay(date) {
           this.selectedAgendaDate = this.toDateKey(date)
           this.agendaFilter = 'hoy'
+        },
+
+        shiftSelectedDay(delta) {
+          const base = this.selectedAgendaDate ? new Date(`${this.selectedAgendaDate}T00:00:00`) : new Date()
+          base.setDate(base.getDate() + delta)
+          this.selectedAgendaDate = this.toDateKey(base)
+        },
+
+        selectedDateLabel() {
+          const base = this.selectedAgendaDate ? new Date(`${this.selectedAgendaDate}T00:00:00`) : new Date()
+          return base.toLocaleDateString('es-AR', {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            timeZone: AR_TZ,
+          }).replace('.', '')
         },
 
         weekDays() {
@@ -725,6 +817,20 @@
         eventsForDate(date) {
           const key = this.toDateKey(date)
           return this.events.filter((e) => this.toDateKey(new Date(e.start)) === key)
+        },
+
+        upcomingEvents(limit = 5) {
+          const now = new Date()
+          return [...this.events]
+            .filter((e) => new Date(e.start) >= now)
+            .sort((a, b) => new Date(a.start) - new Date(b.start))
+            .slice(0, limit)
+        },
+
+        jumpToNextEvent() {
+          const next = this.upcomingEvents(1)[0]
+          if (!next) return
+          this.openDay(new Date(next.start))
         },
 
         memberTaskSummary(events) {
@@ -815,23 +921,81 @@
           return out
         },
 
-        todaysRoutines() {
-          const shortDay = new Date().toLocaleDateString('es-AR', { weekday: 'short', timeZone: AR_TZ }).toLowerCase().replace('.', '')
-          const dayMap = {
-            lun: ['lun', 'lunes'],
-            mar: ['mar', 'martes'],
-            mié: ['mie', 'mié', 'miércoles', 'miercoles'],
-            jue: ['jue', 'jueves'],
-            vie: ['vie', 'viernes'],
-            sáb: ['sab', 'sáb', 'sábado', 'sabado'],
-            dom: ['dom', 'domingo'],
+        normalizeDayToken(dayRaw) {
+          const day = (dayRaw || '').toString().trim().toLowerCase()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          const map = {
+            lu: 'lun', lun: 'lun', lunes: 'lun', mo: 'lun', monday: 'lun',
+            ma: 'mar', mar: 'mar', martes: 'mar', tu: 'mar', tuesday: 'mar',
+            mi: 'mie', mie: 'mie', miercoles: 'mie', we: 'mie', wednesday: 'mie',
+            ju: 'jue', jue: 'jue', jueves: 'jue', th: 'jue', thursday: 'jue',
+            vi: 'vie', vie: 'vie', viernes: 'vie', fr: 'vie', friday: 'vie',
+            sa: 'sab', sab: 'sab', sabado: 'sab', saturday: 'sab',
+            do: 'dom', dom: 'dom', domingo: 'dom', su: 'dom', sunday: 'dom',
           }
-          const keys = dayMap[shortDay] || [shortDay]
+          return map[day] || day
+        },
+
+        normalizeRoutineDays(daysInput) {
+          const raw = (daysInput || '').toString().trim()
+          if (!raw) return []
+          const normalized = raw.toLowerCase()
+            .replace(/lunes a viernes/g, 'lun,mar,mie,jue,vie')
+            .replace(/de lunes a viernes/g, 'lun,mar,mie,jue,vie')
+            .replace(/lunes a sabado/g, 'lun,mar,mie,jue,vie,sab')
+            .replace(/de lunes a sabado/g, 'lun,mar,mie,jue,vie,sab')
+          const unique = []
+          normalized.split(',').map((d) => this.normalizeDayToken(d)).forEach((d) => {
+            if (d && !unique.includes(d)) unique.push(d)
+          })
+          return unique
+        },
+
+        todaysRoutines() {
+          const shortDay = new Date().toLocaleDateString('es-AR', { weekday: 'short', timeZone: AR_TZ })
+          const key = this.normalizeDayToken(shortDay)
           return this.routines.filter((r) => {
             if (!r.is_active) return false
-            const values = (r.days || []).map((d) => d.toLowerCase())
-            return values.some((d) => keys.includes(d))
+            const values = (r.days || []).map((d) => this.normalizeDayToken(d))
+            return values.includes(key)
           })
+        },
+
+        myNickname() {
+          const email = (this.user?.email || '').toLowerCase()
+          if (!email.includes('@')) return ''
+          const local = email.split('@')[0]
+          const match = this.family.find((m) => {
+            const nick = (m.nickname || '').toLowerCase()
+            return nick && (local === nick || local.startsWith(`${nick}.`) || local.endsWith(`.${nick}`))
+          })
+          return (match?.nickname || '').toLowerCase()
+        },
+
+        todaysRoutineActions() {
+          const mine = this.myNickname()
+          const actions = []
+          this.todaysRoutines().forEach((r) => {
+            const children = (r.children || []).join(' y ') || 'los chicos'
+            const place = r.place_name || r.place_alias || 'actividad'
+            const outResp = (r.outbound_responsible || '').toLowerCase()
+            const retResp = (r.return_responsible || '').toLowerCase()
+            if (!mine || mine === outResp) {
+              actions.push({
+                key: `${r.id}-out`,
+                time: r.outbound_time || '--:--',
+                text: `Llevar a ${children} a ${place}`,
+              })
+            }
+            if (!mine || mine === retResp) {
+              actions.push({
+                key: `${r.id}-ret`,
+                time: r.return_time || '--:--',
+                text: `Buscar a ${children} de ${place}`,
+              })
+            }
+          })
+          return actions.sort((a, b) => (a.time || '').localeCompare(b.time || ''))
         },
 
         nextDepartureLabel() {
