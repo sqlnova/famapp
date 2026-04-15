@@ -42,10 +42,26 @@ def send_whatsapp_message(to: str, body: str) -> str:
     return msg.sid
 
 
+def _get_broadcast_recipients() -> List[str]:
+    """Return WhatsApp numbers for all adult family members from DB, falling back to config."""
+    try:
+        from core.supabase_client import get_family_members
+        members = get_family_members()
+        numbers = [m.whatsapp_number for m in members if not m.is_minor and m.whatsapp_number]
+        if numbers:
+            return numbers
+    except Exception:
+        logger.warning("whatsapp_broadcast_db_fallback")
+    return get_settings().phone_list
+
+
 def broadcast_whatsapp_message(body: str, recipients: Optional[List[str]] = None) -> List[str]:
-    """Send a message to multiple family members.  Returns list of SIDs."""
-    s = get_settings()
-    targets = recipients or s.phone_list
+    """Send a message to multiple family members.  Returns list of SIDs.
+
+    If recipients is None, sends to all adult members in the family_members DB
+    (falls back to FAMILY_PHONE_NUMBERS env var if the DB is unavailable).
+    """
+    targets = recipients if recipients is not None else _get_broadcast_recipients()
     sids: List[str] = []
     for to in targets:
         try:
