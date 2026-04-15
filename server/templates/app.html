@@ -874,11 +874,9 @@
 
         memberTasks(member) {
           const nick = (member.nickname || '').toLowerCase()
-          const memberName = (member.name || '').toLowerCase()
           const eventTasks = this.todayEvents().filter((e) => {
             const responsible = (e.responsible_nickname || '').toLowerCase()
-            const children = (e.children || []).map((c) => c.toLowerCase())
-            return responsible === nick || children.includes(memberName) || children.includes(nick)
+            return responsible === nick
           }).map((e) => ({ title: e.title, start: e.start, auto_generated: true }))
           const manualTasks = this.tasks
             .filter((t) => t.status !== 'done')
