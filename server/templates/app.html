@@ -1139,18 +1139,23 @@
               normalizedLocal.endsWith(`.${normalizedNick}`)
             )
           })
-          return (match?.nickname || '').toLowerCase()
+          const result = (match?.nickname || '').toLowerCase()
+          console.log('myNickname debug:', { email, local, familyNicknames: this.family.map(m => m.nickname), result })
+          return result
         },
 
         todaysRoutineActions() {
           const mine = this.myNickname()
           const actions = []
+          const routines = this.todaysRoutines()
 
-          this.todaysRoutines().forEach((r) => {
+          routines.forEach((r) => {
             const children = (r.children || []).join(' y ') || 'los chicos'
             const place = r.place_name || r.place_alias || 'actividad'
             const outResp = (r.outbound_responsible || '').toLowerCase()
             const retResp = (r.return_responsible || '').toLowerCase()
+
+            console.log('routine debug:', { title: r.title, outResp, retResp, mine, matches: { out: mine === outResp, ret: mine === retResp } })
 
             // If user has a valid nickname, only show assigned routines
             // Otherwise, show all routines (fallback when nickname can't be determined)
@@ -1187,6 +1192,7 @@
               }
             }
           })
+          console.log('todaysRoutineActions:', { mine, totalRoutines: routines.length, actionsCount: actions.length })
           return actions.sort((a, b) => (a.time || '').localeCompare(b.time || ''))
         },
 
