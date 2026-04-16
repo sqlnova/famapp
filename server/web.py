@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from agents.schedule.calendar_client import AR_TZ, create_event, delete_event, list_upcoming_events, update_event
 from agents.logistics.maps_client import get_travel_time
 from agents.tasks.suggestions import generate_task_suggestions, filter_duplicate_suggestions
+from agents.intake.graph import intake_graph
 from core.config import get_settings
 from core.models import CalendarEvent, ShoppingItem
 from core.privacy import mask_phone
@@ -702,6 +703,46 @@ async def suggest_tasks(payload: Dict[str, Any] = Body(...), user=Depends(requir
     suggestions = generate_task_suggestions(event)
     suggestions = filter_duplicate_suggestions(suggestions)
     return {"suggestions": suggestions}
+
+
+@router.post("/api/agent/chat")
+async def chat_with_agent(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    """Run FamApp's Intake agent from the private web UI."""
+    raw_message = (payload.get("message") or "").strip()
+    if not raw_message:
+        raise HTTPException(status_code=400, detail="message es obligatorio")
+
+    sender = (getattr(user, "email", None) or "web_user").strip().lower()
+    initial_state = {
+        "messages": [],
+        "raw_text": raw_message,
+        "sender": f"web:{sender}",
+        "intent": None,
+        "confidence": 0.0,
+        "entities": {},
+        "summary": "",
+        "route_to": None,
+        "response_text": None,
+        "message_sid": f"web-{uuid4()}",
+    }
+    try:
+        final_state = await intake_graph.ainvoke(initial_state)
+    except Exception as error:
+        logger.exception("web_agent_chat_failed", error=str(error))
+        raise HTTPException(status_code=500, detail="No se pudo procesar el mensaje en este momento.") from error
+
+    response_text = (
+        (final_state.get("response_text") or "").strip()
+        or "Todavía no pude resolver eso. ¿Querés que lo intentemos con más detalle?"
+    )
+    return {
+        "reply": response_text,
+        "intent": str(final_state.get("intent").value) if final_state.get("intent") else "unknown",
+        "confidence": float(final_state.get("confidence") or 0.0),
+        "route_to": final_state.get("route_to") or "direct",
+        "entities": final_state.get("entities") or {},
+        "summary": final_state.get("summary") or "",
+    }
 
 
 # ── Places ────────────────────────────────────────────────────────────────────
