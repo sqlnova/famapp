@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import structlog
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -55,24 +55,33 @@ Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
                              "guarda que el club es en Av Ávalos 1085",
                              "cada vez que diga supermercado es el Jumbo de Av. Alberdi 200",
                              "¿qué lugares tenemos guardados?"
+   - "expense"  : registrar o consultar un gasto del hogar.
+                   Ejemplos: "gasté $8500 en el súper", "anoté $1200 en farmacia",
+                             "papá pagó $3000 de nafta", "¿cuánto gastamos este mes?",
+                             "¿qué gastos tenemos esta semana?"
+   - "homework"  : tareas o deberes de los chicos.
+                   Ejemplos: "Giuseppe tiene que entregar la maqueta el viernes",
+                             "Gaetano tiene que estudiar matemáticas para el lunes",
+                             "¿qué tareas tienen pendientes?", "ya entregó el trabajo de lengua"
+   - "memory"   : recordar o consultar datos importantes de la familia (preferencias, médicos, etc.).
+                   Ejemplos: "guardá que Gaetano no come mariscos",
+                             "el pediatra de los chicos es el Dr. Ruiz, tel 362-123456",
+                             "¿qué recordás de Giuseppe?", "¿tenemos info sobre la dieta de alguien?"
    - "unknown"   : no podés determinar la intención con certeza
 
    REGLA CLAVE: Si el mensaje menciona a una persona que va a algún lugar a una hora específica
    (ej: "papá lleva a X al club a las 16", "tienen que estar en Y a las 20"), clasificalo como
    "schedule" — el agente de calendario se encargará de crearlo aunque no digan "agenda".
 
-   IMPORTANTE: Nunca uses "unknown" si el mensaje claramente habla de calendario, viajes o compras.
-   La categoría "query" NO EXISTE — toda consulta cae en schedule, logistics o shopping según el tema.
+   IMPORTANTE: Nunca uses "unknown" si el mensaje claramente habla de calendario, viajes, compras,
+   gastos, tareas escolares o información familiar. La categoría "query" NO EXISTE.
 
 2. Extraer ENTIDADES según la intención:
    - schedule  → { "title": str, "date": str, "time": str, "location": str, "people": [str] }
    - logistics → {
        "action": "travel_time" | "request_alert",
-       // travel_time:
        "destination": str, "event_time": str, "origin": str,
-       // request_alert:
-       "event_name": str,   // nombre del evento o lugar (ej: "colegio", "club", "dentista")
-       "date": "YYYY-MM-DD" // fecha del evento; null = próxima ocurrencia
+       "event_name": str, "date": "YYYY-MM-DD"
      }
    - shopping  → {
        "action": "add" | "list" | "mark_done",
@@ -81,9 +90,27 @@ Tu tarea es analizar mensajes de WhatsApp de miembros de la familia y:
      Para "mark_done" los items contienen solo el nombre de lo que ya se compró.
    - places    → {
        "action": "save" | "list",
-       "alias": str,    // nombre corto en minúsculas sin tildes: "colegio", "club"
-       "name":  str,    // nombre descriptivo completo (puede ser null)
-       "address": str   // dirección completa (puede ser null si action es "list")
+       "alias": str, "name": str, "address": str
+     }
+   - expense   → {
+       "action": "add" | "list",
+       "description": str,        // qué se compró/pagó
+       "amount": float,           // monto sin símbolo de moneda
+       "category": str,           // Supermercado | Farmacia | Combustible | Servicios | Salud | Educación | Ocio | General
+       "paid_by": str | null,     // nickname de quien pagó (null = no especificado)
+       "date": "YYYY-MM-DD" | null  // null = hoy
+     }
+   - homework  → {
+       "action": "add" | "list" | "mark_done",
+       "child_name": str,         // nombre del chico
+       "subject": str,            // materia (ej: "Matemáticas", "Lengua")
+       "description": str,        // detalle de la tarea
+       "due_date": "YYYY-MM-DD"   // fecha de entrega
+     }
+   - memory    → {
+       "action": "save" | "query",
+       "subject": str,    // nickname o tema ("gaetano", "salud", "general")
+       "note": str        // contenido a recordar (para "save"), o null para "query"
      }
 
 3. Responder en español rioplatense informal y breve.
@@ -99,12 +126,58 @@ Devolvé SIEMPRE JSON sin markdown:
 """
 
 
+def _build_history_context(sender: str) -> str:
+    """Return the last 3 messages from this sender as context string."""
+    try:
+        from core.supabase_client import get_recent_messages_from_sender
+        history = get_recent_messages_from_sender(sender, limit=3)
+        if not history:
+            return ""
+        lines = ["HISTORIAL RECIENTE (últimos mensajes del mismo remitente):"]
+        for msg in history:
+            body = msg.get("body", "")
+            response = msg.get("response", "")
+            if body:
+                lines.append(f"  Usuario: {body}")
+            if response:
+                lines.append(f"  FamApp:  {response}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+def _resolve_sender_nickname(sender: str) -> Optional[str]:
+    """Attempt to resolve the sender's WhatsApp number to their family nickname."""
+    try:
+        from core.supabase_client import get_family_member_by_phone
+        member = get_family_member_by_phone(sender)
+        return member.nickname if member else None
+    except Exception:
+        return None
+
+
 async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
-    """LLM call to parse intent and extract entities."""
+    """LLM call to parse intent and extract entities.
+    Includes message history and sender identity for context.
+    """
     llm = _get_llm()
+
+    # Resolve sender identity once per message
+    sender_nickname = state.get("sender_nickname") or _resolve_sender_nickname(state["sender"])
+
+    # Build user content with context
+    user_parts = []
+    if sender_nickname:
+        user_parts.append(f"[Remitente: {sender_nickname}]")
+    history = _build_history_context(state["sender"])
+    if history:
+        user_parts.append(history)
+    user_parts.append(f"Mensaje actual: {state['raw_text']}")
+    user_content = "\n\n".join(user_parts)
+
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=state["raw_text"]),
+        HumanMessage(content=user_content),
     ]
     logger.info("intake_parsing", sender=state["sender"], raw_text=state["raw_text"])
     response = await llm.ainvoke(messages)
@@ -113,7 +186,6 @@ async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError:
-        import re
         match = re.search(r"\{.*\}", content, re.DOTALL)
         parsed = json.loads(match.group()) if match else {}
 
@@ -138,6 +210,7 @@ async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
         "entities": parsed.get("entities", {}),
         "summary": parsed.get("summary", ""),
         "response_text": parsed.get("response"),
+        "sender_nickname": sender_nickname,
     }
 
 
@@ -354,6 +427,38 @@ async def handle_logistics(state: IntakeState) -> Dict[str, Any]:
     return {"response_text": response_text, "route_to": "logistics"}
 
 
+async def handle_expense(state: IntakeState) -> Dict[str, Any]:
+    """Record or query family expenses."""
+    from agents.expenses import handle_expense_request
+    response_text = await handle_expense_request(
+        sender=state["sender"],
+        sender_nickname=state.get("sender_nickname"),
+        entities=state.get("entities", {}),
+    )
+    return {"response_text": response_text, "route_to": "direct"}
+
+
+async def handle_homework(state: IntakeState) -> Dict[str, Any]:
+    """Record or query children's homework tasks."""
+    from agents.homework import handle_homework_request
+    response_text = await handle_homework_request(
+        sender=state["sender"],
+        entities=state.get("entities", {}),
+    )
+    return {"response_text": response_text, "route_to": "direct"}
+
+
+async def handle_memory(state: IntakeState) -> Dict[str, Any]:
+    """Save or query family memory notes."""
+    from agents.memory import handle_memory_request
+    response_text = await handle_memory_request(
+        sender=state["sender"],
+        sender_nickname=state.get("sender_nickname"),
+        entities=state.get("entities", {}),
+    )
+    return {"response_text": response_text, "route_to": "direct"}
+
+
 async def build_response(state: IntakeState) -> Dict[str, Any]:
     """Ensure we always have a response_text."""
     if state.get("response_text"):
@@ -364,6 +469,9 @@ async def build_response(state: IntakeState) -> Dict[str, Any]:
         IntentType.SCHEDULE:  "Voy a revisar el calendario ahora.",
         IntentType.LOGISTICS: "Calculo el tiempo de viaje y te aviso.",
         IntentType.SHOPPING:  "Listo, actualicé la lista.",
+        IntentType.EXPENSE:   "Anotado el gasto.",
+        IntentType.HOMEWORK:  "Anotada la tarea.",
+        IntentType.MEMORY:    "Guardado.",
         IntentType.UNKNOWN:   "No entendí bien. ¿Podés reformular con más detalle?",
     }
     return {"response_text": fallbacks.get(intent, "Procesando tu solicitud…")}
@@ -382,6 +490,9 @@ async def determine_route(state: IntakeState) -> str:
         IntentType.SCHEDULE:  "handle_schedule",
         IntentType.LOGISTICS: "handle_logistics",
         IntentType.PLACES:    "handle_places",
+        IntentType.EXPENSE:   "handle_expense",
+        IntentType.HOMEWORK:  "handle_homework",
+        IntentType.MEMORY:    "handle_memory",
         IntentType.UNKNOWN:   "build_response",
     }
     route = route_map.get(intent, "build_response")

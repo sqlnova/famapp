@@ -13,6 +13,7 @@ from core.supabase_client import (
     mark_shopping_items_done_by_names,
 )
 from core.models import ShoppingItem
+from core.shopping_categories import categorize_item
 
 logger = structlog.get_logger(__name__)
 
@@ -27,26 +28,42 @@ async def add_item_to_shopping_list(name: str, quantity: str = "", unit: str = "
         unit: Optional unit of measure (e.g. "kg", "unidades").
         added_by: Phone number of the person who requested it.
     """
-    item = ShoppingItem(name=name, quantity=quantity or None, unit=unit or None, added_by=added_by or None)
+    category = categorize_item(name)
+    item = ShoppingItem(
+        name=name,
+        quantity=quantity or None,
+        unit=unit or None,
+        added_by=added_by or None,
+        category=category,
+    )
     await add_shopping_item(item)
-    logger.info("shopping_item_added", item=name)
+    logger.info("shopping_item_added", item=name, category=category)
     return f"Agregué *{name}* a la lista. 🛒"
 
 
 @tool
 async def list_shopping_items() -> str:
-    """Return all pending items in the family shopping list."""
+    """Return all pending items in the family shopping list, grouped by category."""
     items = await get_pending_shopping_items()
     if not items:
         return "La lista de compras está vacía. 🎉"
-    lines = []
-    for i, item in enumerate(items, 1):
-        line = f"{i}. {item.name}"
-        if item.quantity:
-            unit_str = f" {item.unit}" if item.unit else ""
-            line += f" ({item.quantity}{unit_str})"
-        lines.append(line)
-    return "🛒 *Lista de compras:*\n" + "\n".join(lines)
+
+    # Group by category
+    grouped: dict[str, list] = {}
+    for item in items:
+        cat = item.category or "Otros"
+        grouped.setdefault(cat, []).append(item)
+
+    lines = ["🛒 *Lista de compras:*"]
+    for cat, cat_items in sorted(grouped.items()):
+        lines.append(f"\n*{cat}*")
+        for item in cat_items:
+            line = f"  • {item.name}"
+            if item.quantity:
+                unit_str = f" {item.unit}" if item.unit else ""
+                line += f" ({item.quantity}{unit_str})"
+            lines.append(line)
+    return "\n".join(lines)
 
 
 @tool

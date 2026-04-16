@@ -353,22 +353,29 @@
 
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
           <h3 class="font-medium mb-2">Pendientes</h3>
-          <template x-for="item in shoppingPending" :key="item.id">
-            <div class="py-2 border-b border-slate-100 last:border-b-0 text-sm space-y-1">
-              <div x-show="editingShoppingId!==item.id" class="flex items-center justify-between gap-2">
-                <button @click="markDone(item.id)" class="text-left flex-1">☐ <span x-text="item.name"></span></button>
-                <div class="flex gap-2">
-                  <button @click="startEditShopping(item)" class="text-xs text-iosBlue">Editar</button>
-                  <button @click="deleteShopping(item.id)" class="text-xs text-red-500">Eliminar</button>
+          <template x-for="cat in shoppingCategories" :key="cat.name">
+            <div class="mb-3">
+              <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1" x-text="cat.name"></p>
+              <template x-for="item in cat.items" :key="item.id">
+                <div class="py-2 border-b border-slate-100 last:border-b-0 text-sm space-y-1">
+                  <div x-show="editingShoppingId!==item.id" class="flex items-center justify-between gap-2">
+                    <button @click="markDone(item.id)" class="text-left flex-1">☐ <span x-text="item.name"></span>
+                      <span x-show="item.quantity" class="text-slate-400 ml-1" x-text="item.quantity + (item.unit ? ' ' + item.unit : '')"></span>
+                    </button>
+                    <div class="flex gap-2">
+                      <button @click="startEditShopping(item)" class="text-xs text-iosBlue">Editar</button>
+                      <button @click="deleteShopping(item.id)" class="text-xs text-red-500">Eliminar</button>
+                    </div>
+                  </div>
+                  <div x-show="editingShoppingId===item.id" class="grid grid-cols-12 gap-2">
+                    <input x-model="shoppingEdit.name" class="col-span-6 rounded-xl border border-slate-200 px-2 py-1">
+                    <input x-model="shoppingEdit.quantity" class="col-span-3 rounded-xl border border-slate-200 px-2 py-1">
+                    <input x-model="shoppingEdit.unit" class="col-span-3 rounded-xl border border-slate-200 px-2 py-1">
+                    <button @click="saveShoppingEdit(item.id)" class="col-span-6 bg-iosBlue text-white rounded-xl py-1">Guardar</button>
+                    <button @click="cancelShoppingEdit" class="col-span-6 bg-slate-100 rounded-xl py-1">Cancelar</button>
+                  </div>
                 </div>
-              </div>
-              <div x-show="editingShoppingId===item.id" class="grid grid-cols-12 gap-2">
-                <input x-model="shoppingEdit.name" class="col-span-6 rounded-xl border border-slate-200 px-2 py-1">
-                <input x-model="shoppingEdit.quantity" class="col-span-3 rounded-xl border border-slate-200 px-2 py-1">
-                <input x-model="shoppingEdit.unit" class="col-span-3 rounded-xl border border-slate-200 px-2 py-1">
-                <button @click="saveShoppingEdit(item.id)" class="col-span-6 bg-iosBlue text-white rounded-xl py-1">Guardar</button>
-                <button @click="cancelShoppingEdit" class="col-span-6 bg-slate-100 rounded-xl py-1">Cancelar</button>
-              </div>
+              </template>
             </div>
           </template>
           <p x-show="shoppingPending.length===0" class="text-sm text-slate-400">Nada pendiente.</p>
@@ -586,6 +593,15 @@
         loggingIn: false,
         events: [],
         shoppingPending: [],
+        get shoppingCategories() {
+          const grouped = {}
+          for (const item of this.shoppingPending) {
+            const cat = item.category || 'Otros'
+            if (!grouped[cat]) grouped[cat] = []
+            grouped[cat].push(item)
+          }
+          return Object.keys(grouped).sort().map(name => ({ name, items: grouped[name] }))
+        },
         editingShoppingId: null,
         shoppingEdit: { name: '', quantity: '', unit: '' },
         family: [],

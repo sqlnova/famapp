@@ -407,6 +407,7 @@ async def handle_schedule(
                 return "No pude entender qué evento crear. ¿Podés darme más detalles?"
 
             created_msgs = []
+            new_events_to_check: List[CalendarEvent] = []
             explicit_range = _extract_time_range(raw_text)
             for ev_data in ev_list:
                 date_str = ev_data.get("date", datetime.now().strftime("%Y-%m-%d"))
@@ -433,13 +434,19 @@ async def handle_schedule(
                     responsible_nickname=responsible,
                 )
                 created = create_event(event)
+                new_events_to_check.append(created)
                 date_fmt = start_local.strftime("%-d/%-m a las %H:%M")
                 resp_note = f" ({responsible})" if responsible else ""
                 created_msgs.append(f"• *{created.title}* — {date_fmt}{resp_note}")
                 _notify_responsible(responsible, sender, created.title, date_fmt, location)
 
             header = "✅ Evento creado:" if len(created_msgs) == 1 else f"✅ {len(created_msgs)} eventos creados:"
-            return header + "\n" + "\n".join(created_msgs)
+            response = header + "\n" + "\n".join(created_msgs)
+            # Detect conflicts against existing calendar
+            conflicts = _check_conflicts(new_events_to_check)
+            if conflicts:
+                response += "\n\n" + "\n".join(conflicts)
+            return response
 
         elif action == "recurring_create":
             # Support both `events: [...]` (new) and `event: {...}` (legacy)
@@ -608,6 +615,44 @@ async def handle_schedule(
     except Exception:
         logger.exception("schedule_agent_error")
         return "No pude acceder al calendario ahora. Revisá que la cuenta de servicio tenga acceso."
+
+
+def _check_conflicts(
+    events_to_create: List[CalendarEvent],
+    existing_events: Optional[List[CalendarEvent]] = None,
+) -> List[str]:
+    """Return human-readable warnings for scheduling conflicts.
+
+    A conflict exists when the responsible person for a new event already has
+    another event that overlaps (same time window, same day).
+    """
+    warnings: List[str] = []
+    if not events_to_create:
+        return warnings
+
+    # Lazy-load existing events only once
+    if existing_events is None:
+        try:
+            existing_events = list_upcoming_events(days=60, max_results=200)
+        except Exception:
+            return warnings
+
+    for new_ev in events_to_create:
+        if not new_ev.responsible_nickname:
+            continue
+        responsible = new_ev.responsible_nickname.lower()
+        for existing in existing_events:
+            if (existing.responsible_nickname or "").lower() != responsible:
+                continue
+            # Check time overlap: [new.start, new.end) ∩ [existing.start, existing.end) ≠ ∅
+            if new_ev.start < existing.end and new_ev.end > existing.start:
+                existing_local = existing.start.astimezone(AR_TZ)
+                warnings.append(
+                    f"⚠️ *{new_ev.responsible_nickname}* ya tiene *{existing.title}* "
+                    f"a las {existing_local.strftime('%H:%M')} ese día."
+                )
+                break  # one warning per new event is enough
+    return warnings
 
 
 def _notify_responsible(

@@ -41,8 +41,21 @@ def _mark_sent(summary_date: date, content: str) -> None:
     }).execute()
 
 
+def _get_due_tasks_today() -> list:
+    """Fetch tasks and homework due today or overdue."""
+    try:
+        from core.supabase_client import get_due_tasks_today, get_pending_homework
+        from datetime import date
+        tasks = get_due_tasks_today()
+        today_str = date.today().isoformat()
+        homework = [h for h in get_pending_homework() if h.due_date <= today_str]
+        return tasks, homework
+    except Exception:
+        return [], []
+
+
 def _build_summary_text(today: date) -> str:
-    """Fetch today's events and build the WhatsApp summary message."""
+    """Fetch today's events, pending tasks and homework and build the WhatsApp summary message."""
     # Fetch events for today only (next 24h starting from midnight)
     events = list_upcoming_events(days=1)
 
@@ -59,24 +72,37 @@ def _build_summary_text(today: date) -> str:
     month_name = MONTHS_ES.get(today.month, "")
     date_str = f"{day_name} {today.day} de {month_name}"
 
-    if not today_events:
-        return (
-            f"📅 *Buenos días!* {date_str}\n\n"
-            f"No tenés eventos agendados para hoy. 🎉"
-        )
-
     lines = [f"📅 *Buenos días!* {date_str}\n"]
-    lines.append("*Agenda de hoy:*")
 
-    for e in today_events:
-        local = e.start.astimezone(AR_TZ)
-        time_str = local.strftime("%H:%M")
-        line = f"• {time_str} – {e.title}"
-        if e.location:
-            line += f" 📍 {e.location}"
-        lines.append(line)
+    if today_events:
+        lines.append("*Agenda de hoy:*")
+        for e in today_events:
+            local = e.start.astimezone(AR_TZ)
+            time_str = local.strftime("%H:%M")
+            line = f"• {time_str} – {e.title}"
+            if e.location:
+                line += f" 📍 {e.location}"
+            if e.responsible_nickname:
+                line += f" ({e.responsible_nickname})"
+            lines.append(line)
+    else:
+        lines.append("No tenés eventos agendados para hoy. 🎉")
 
-    # Also include tomorrow's events as a preview
+    # Pending tasks due today or overdue
+    due_tasks, due_homework = _get_due_tasks_today()
+
+    if due_tasks:
+        lines.append("\n*Tareas pendientes:*")
+        for t in due_tasks:
+            assignee = f" → {t['assignee']}" if t.get("assignee") else ""
+            lines.append(f"• {t['title']}{assignee}")
+
+    if due_homework:
+        lines.append("\n*Deberes:*")
+        for h in due_homework:
+            lines.append(f"• {h.child_name}: {h.description} ({h.subject})")
+
+    # Tomorrow's events as preview
     tomorrow_start = today_end
     tomorrow_end = tomorrow_start + timedelta(days=1)
     all_events = list_upcoming_events(days=2)
