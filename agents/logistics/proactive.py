@@ -227,7 +227,11 @@ def _fire_alert(
 # ── Scheduler job ─────────────────────────────────────────────────────────────
 
 async def check_and_send_due_alerts() -> None:
-    """Send any alerts whose scheduled_send time has passed."""
+    """Send any alerts whose scheduled_send time has passed.
+
+    Re-queries Google Maps for fresh traffic data just before sending,
+    so the departure time shown is accurate at the moment of the alert.
+    """
     client = get_supabase()
     now = datetime.now(timezone.utc)
     result = (
@@ -244,17 +248,30 @@ async def check_and_send_due_alerts() -> None:
 
             event_time_str = ""
             event_start_raw = row.get("event_start_utc")
+            start_dt = None
             if event_start_raw:
-                start_dt = datetime.fromisoformat(event_start_raw).astimezone(AR_TZ)
-                event_time_str = start_dt.strftime("%H:%M")
+                start_dt = datetime.fromisoformat(event_start_raw)
+                event_time_str = start_dt.astimezone(AR_TZ).strftime("%H:%M")
 
-            leave_at_str = ""
-            leave_at_raw = row.get("leave_at_utc")
-            if leave_at_raw:
-                leave_dt = datetime.fromisoformat(leave_at_raw).astimezone(AR_TZ)
-                leave_at_str = leave_dt.strftime("%H:%M")
-
+            # ── Recalculate travel time with fresh traffic data ────────────
             travel_min = row.get("travel_minutes")
+            route_summary = ""
+            leave_at_str = ""
+            try:
+                from agents.logistics.maps_client import get_travel_time
+                fresh = get_travel_time(destination=destination, departure_time=now)
+                travel_min = fresh.duration_minutes
+                route_summary = fresh.summary  # e.g. "Av. Corrientes"
+                if start_dt:
+                    fresh_leave = start_dt - timedelta(minutes=travel_min)
+                    leave_at_str = fresh_leave.astimezone(AR_TZ).strftime("%H:%M")
+            except Exception:
+                # Maps unavailable – fall back to stored values
+                leave_at_raw = row.get("leave_at_utc")
+                if leave_at_raw:
+                    leave_at_str = datetime.fromisoformat(leave_at_raw).astimezone(AR_TZ).strftime("%H:%M")
+                logger.warning("logistics_recalc_maps_failed", event=event_title)
+
             travel_str = (
                 f"{travel_min} min" if travel_min and travel_min < 60
                 else f"{travel_min // 60}h {travel_min % 60}min" if travel_min
@@ -265,13 +282,15 @@ async def check_and_send_due_alerts() -> None:
             responsible_wa = row.get("responsible_whatsapp")
             recipients = [responsible_wa] if responsible_wa else (row.get("send_to") or None)
 
-            lines = [f"🚗 *¡Hora de prepararse!*"]
+            lines = ["🚗 *¡Hora de prepararse!*"]
             lines.append(f"📅 {event_title}" + (f" a las {event_time_str}" if event_time_str else ""))
             lines.append(f"📍 {destination}")
+            if route_summary:
+                lines.append(f"🛣 Ruta: {route_summary}")
             if leave_at_str:
                 lines.append(f"🕐 Salís a las *{leave_at_str}*")
             if travel_str:
-                lines.append(f"⏱ Tráfico estimado: {travel_str}")
+                lines.append(f"⏱ Tráfico en este momento: {travel_str}")
             msg = "\n".join(lines)
 
             broadcast_whatsapp_message(msg, recipients=recipients)
@@ -281,6 +300,7 @@ async def check_and_send_due_alerts() -> None:
                 event=event_title,
                 destination=destination,
                 recipient=responsible_wa or "all",
+                travel_min=travel_min,
             )
         except Exception:
             logger.exception("logistics_due_alert_error", row_id=row.get("id"))

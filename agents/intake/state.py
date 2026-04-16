@@ -16,6 +16,7 @@ class IntakeState(TypedDict):
     # Inbound message
     raw_text: str
     sender: str           # whatsapp:+XXXXXXXXXX
+    sender_nickname: Optional[str]   # resolved from family_members table
 
     # Parsed by LLM
     intent: Optional[IntentType]

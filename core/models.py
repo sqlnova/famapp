@@ -16,6 +16,9 @@ class IntentType(str, Enum):
     LOGISTICS = "logistics"     # "a qué hora salgo para llegar a tiempo"
     SHOPPING = "shopping"       # "agregá leche a la lista"
     PLACES = "places"           # "el colegio es en Av. X 123"
+    EXPENSE = "expense"         # "anoté $8500 en el súper"
+    HOMEWORK = "homework"       # "Giuseppe tiene que entregar la maqueta el viernes"
+    MEMORY = "memory"           # "Gaetano no come mariscos" / "qué recordás de Giuseppe?"
     QUERY = "query"             # "qué tengo mañana?"
     UNKNOWN = "unknown"
 
@@ -132,6 +135,44 @@ class ShoppingItem(BaseModel):
     added_by: Optional[str] = None
     added_at: datetime = Field(default_factory=datetime.utcnow)
     done: bool = False
+    category: str = "Otros"
+    times_purchased: int = 0
+
+
+# ── Expenses ──────────────────────────────────────────────────────────────────
+
+class Expense(BaseModel):
+    id: Optional[UUID] = None
+    description: str
+    amount: float
+    category: str = "General"
+    paid_by: Optional[str] = None        # nickname
+    expense_date: Optional[str] = None   # YYYY-MM-DD
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── Homework ──────────────────────────────────────────────────────────────────
+
+class HomeworkTask(BaseModel):
+    id: Optional[UUID] = None
+    child_name: str
+    subject: str = "General"
+    description: str
+    due_date: str                        # YYYY-MM-DD
+    done: bool = False
+    added_by: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── Family Memory ─────────────────────────────────────────────────────────────
+
+class FamilyNote(BaseModel):
+    id: Optional[UUID] = None
+    subject: str = "general"
+    note: str
+    added_by: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 # ── DB record ─────────────────────────────────────────────────────────────────

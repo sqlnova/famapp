@@ -11,8 +11,11 @@ from supabase import Client, create_client
 
 from core.config import get_settings
 from core.models import (
+    Expense,
     FamilyMember,
+    FamilyNote,
     FamilyRoutine,
+    HomeworkTask,
     KnownPlace,
     MessageRecord,
     MessageStatus,
@@ -29,6 +32,34 @@ def get_supabase() -> Client:
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────
+
+def get_recent_messages_from_sender(from_number: str, limit: int = 3) -> List[Dict[str, Any]]:
+    """Return the last N messages from a given sender for conversation context."""
+    client = get_supabase()
+    result = (
+        client.table("messages")
+        .select("body, intent, response, created_at")
+        .eq("from_number", from_number)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return list(reversed(result.data))  # chronological order
+
+
+def get_family_member_by_phone(phone: str) -> Optional[FamilyMember]:
+    """Look up a family member by their whatsapp number (with or without 'whatsapp:' prefix)."""
+    client = get_supabase()
+    normalized = phone if phone.startswith("whatsapp:") else f"whatsapp:{phone}"
+    result = (
+        client.table("family_members")
+        .select("*")
+        .eq("whatsapp_number", normalized)
+        .limit(1)
+        .execute()
+    )
+    return FamilyMember(**result.data[0]) if result.data else None
+
 
 async def upsert_message(record: MessageRecord) -> MessageRecord:
     client = get_supabase()
@@ -206,3 +237,89 @@ def upsert_family_routine(payload: Dict[str, Any]) -> FamilyRoutine:
     client = get_supabase()
     result = client.table("family_routines").upsert(payload).execute()
     return FamilyRoutine(**result.data[0])
+
+
+# ── Expenses ──────────────────────────────────────────────────────────────────
+
+def add_expense(expense: Expense) -> Expense:
+    client = get_supabase()
+    data = expense.model_dump(mode="json", exclude_none=True)
+    data.pop("id", None)
+    data.pop("created_at", None)
+    result = client.table("expenses").insert(data).execute()
+    return Expense(**result.data[0])
+
+
+def get_expenses(days: int = 30, paid_by: Optional[str] = None) -> List[Expense]:
+    from datetime import date, timedelta
+    client = get_supabase()
+    since = (date.today() - timedelta(days=days)).isoformat()
+    q = client.table("expenses").select("*").gte("expense_date", since).order("expense_date", desc=True)
+    if paid_by:
+        q = q.eq("paid_by", paid_by)
+    result = q.execute()
+    return [Expense(**r) for r in result.data]
+
+
+# ── Homework ──────────────────────────────────────────────────────────────────
+
+def add_homework_task(task: HomeworkTask) -> HomeworkTask:
+    client = get_supabase()
+    data = task.model_dump(mode="json", exclude_none=True)
+    data.pop("id", None)
+    data.pop("created_at", None)
+    result = client.table("homework_tasks").insert(data).execute()
+    return HomeworkTask(**result.data[0])
+
+
+def get_pending_homework(child_name: Optional[str] = None) -> List[HomeworkTask]:
+    client = get_supabase()
+    q = client.table("homework_tasks").select("*").eq("done", False).order("due_date")
+    if child_name:
+        q = q.ilike("child_name", f"%{child_name.strip()}%")
+    result = q.execute()
+    return [HomeworkTask(**r) for r in result.data]
+
+
+def mark_homework_done(task_id: str) -> None:
+    client = get_supabase()
+    client.table("homework_tasks").update({
+        "done": True,
+        "done_at": datetime.utcnow().isoformat(),
+    }).eq("id", task_id).execute()
+
+
+def get_due_tasks_today() -> List[Dict[str, Any]]:
+    """Return tasks (family_task agent) that are due today and not done/cancelled."""
+    from datetime import date
+    client = get_supabase()
+    today = date.today().isoformat()
+    result = (
+        client.table("tasks")
+        .select("title, assignee, due_date, notes")
+        .eq("agent", "family_task")
+        .not_.in_("status", ["done", "cancelled"])
+        .lte("due_date", today)
+        .execute()
+    )
+    return result.data
+
+
+# ── Family Memory ─────────────────────────────────────────────────────────────
+
+def add_family_note(note: FamilyNote) -> FamilyNote:
+    client = get_supabase()
+    data = note.model_dump(mode="json", exclude_none=True)
+    data.pop("id", None)
+    data.pop("created_at", None)
+    result = client.table("family_notes").insert(data).execute()
+    return FamilyNote(**result.data[0])
+
+
+def get_family_notes(subject: Optional[str] = None) -> List[FamilyNote]:
+    client = get_supabase()
+    q = client.table("family_notes").select("*").order("created_at", desc=True)
+    if subject:
+        q = q.ilike("subject", f"%{subject.strip()}%")
+    result = q.execute()
+    return [FamilyNote(**r) for r in result.data]

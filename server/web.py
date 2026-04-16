@@ -1035,3 +1035,143 @@ async def api_save_routine(payload: Dict[str, Any] = Body(...), user=Depends(req
             logger.exception("routine_mirror_events_failed")
 
     return routine_obj
+
+
+# ── Expenses ──────────────────────────────────────────────────────────────────
+
+@router.get("/api/expenses")
+async def api_get_expenses(days: int = 30, user=Depends(require_auth)):
+    from core.supabase_client import get_expenses
+    expenses = get_expenses(days=days)
+    return [
+        {
+            "id": str(e.id) if e.id else None,
+            "description": e.description,
+            "amount": e.amount,
+            "category": e.category,
+            "paid_by": e.paid_by,
+            "expense_date": e.expense_date,
+        }
+        for e in expenses
+    ]
+
+
+@router.post("/api/expenses")
+async def api_add_expense(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    from core.models import Expense
+    from core.supabase_client import add_expense
+    from agents.expenses import _categorize_expense
+
+    amount_raw = payload.get("amount")
+    try:
+        amount = float(str(amount_raw).replace(",", ".").replace("$", "").strip())
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Monto inválido")
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="El monto debe ser mayor a cero")
+
+    description = (payload.get("description") or "").strip()
+    category = payload.get("category") or _categorize_expense(description)
+    expense = Expense(
+        description=description or "Gasto",
+        amount=amount,
+        category=category,
+        paid_by=payload.get("paid_by") or None,
+        expense_date=payload.get("expense_date") or None,
+        notes=payload.get("notes") or None,
+    )
+    saved = add_expense(expense)
+    return {"id": str(saved.id), "ok": True}
+
+
+# ── Homework ──────────────────────────────────────────────────────────────────
+
+@router.get("/api/homework")
+async def api_get_homework(child: Optional[str] = None, user=Depends(require_auth)):
+    from core.supabase_client import get_pending_homework
+    tasks = get_pending_homework(child)
+    return [
+        {
+            "id": str(t.id) if t.id else None,
+            "child_name": t.child_name,
+            "subject": t.subject,
+            "description": t.description,
+            "due_date": t.due_date,
+            "done": t.done,
+        }
+        for t in tasks
+    ]
+
+
+@router.post("/api/homework")
+async def api_add_homework(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    from core.models import HomeworkTask
+    from core.supabase_client import add_homework_task
+
+    child_name = (payload.get("child_name") or "").strip()
+    description = (payload.get("description") or "").strip()
+    due_date = (payload.get("due_date") or "").strip()
+    if not child_name or not description or not due_date:
+        raise HTTPException(status_code=400, detail="child_name, description y due_date son obligatorios")
+
+    task = HomeworkTask(
+        child_name=child_name,
+        subject=(payload.get("subject") or "General").strip(),
+        description=description,
+        due_date=due_date,
+        added_by=None,
+    )
+    saved = add_homework_task(task)
+    return {"id": str(saved.id), "ok": True}
+
+
+@router.put("/api/homework/{task_id}/done")
+async def api_homework_done(task_id: str, user=Depends(require_auth)):
+    from core.supabase_client import mark_homework_done
+    mark_homework_done(task_id)
+    return {"ok": True}
+
+
+# ── Family Memory ─────────────────────────────────────────────────────────────
+
+@router.get("/api/memory")
+async def api_get_memory(subject: Optional[str] = None, user=Depends(require_auth)):
+    from core.supabase_client import get_family_notes
+    notes = get_family_notes(subject)
+    return [
+        {
+            "id": str(n.id) if n.id else None,
+            "subject": n.subject,
+            "note": n.note,
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        }
+        for n in notes
+    ]
+
+
+@router.post("/api/memory")
+async def api_add_memory(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    from core.models import FamilyNote
+    from core.supabase_client import add_family_note
+
+    note_text = (payload.get("note") or "").strip()
+    if not note_text:
+        raise HTTPException(status_code=400, detail="note es obligatorio")
+
+    note = FamilyNote(
+        subject=(payload.get("subject") or "general").strip().lower(),
+        note=note_text,
+        added_by=None,
+    )
+    saved = add_family_note(note)
+    return {"id": str(saved.id), "ok": True}
+
+
+@router.delete("/api/memory/{note_id}")
+async def api_delete_memory(note_id: str, user=Depends(require_auth)):
+    from core.supabase_client import get_supabase
+    client = get_supabase()
+    result = client.table("family_notes").delete().eq("id", note_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Nota no encontrada")
+    return {"ok": True}

@@ -9,7 +9,10 @@ from langgraph.graph import END, START, StateGraph
 from agents.intake.nodes import (
     build_response,
     determine_route,
+    handle_expense,
+    handle_homework,
     handle_logistics,
+    handle_memory,
     handle_places,
     handle_schedule,
     handle_shopping,
@@ -32,6 +35,9 @@ def build_intake_graph() -> StateGraph:
     graph.add_node("handle_schedule",   handle_schedule)
     graph.add_node("handle_logistics",  handle_logistics)
     graph.add_node("handle_places",     handle_places)
+    graph.add_node("handle_expense",    handle_expense)
+    graph.add_node("handle_homework",   handle_homework)
+    graph.add_node("handle_memory",     handle_memory)
     graph.add_node("build_response",    build_response)
 
     graph.add_edge(START, "parse_and_classify")
@@ -44,6 +50,9 @@ def build_intake_graph() -> StateGraph:
             "handle_schedule":  "handle_schedule",
             "handle_logistics": "handle_logistics",
             "handle_places":    "handle_places",
+            "handle_expense":   "handle_expense",
+            "handle_homework":  "handle_homework",
+            "handle_memory":    "handle_memory",
             "build_response":   "build_response",
         },
     )
@@ -52,6 +61,9 @@ def build_intake_graph() -> StateGraph:
     graph.add_edge("handle_schedule",  "build_response")
     graph.add_edge("handle_logistics", "build_response")
     graph.add_edge("handle_places",    "build_response")
+    graph.add_edge("handle_expense",   "build_response")
+    graph.add_edge("handle_homework",  "build_response")
+    graph.add_edge("handle_memory",    "build_response")
     graph.add_edge("build_response",   END)
 
     return graph.compile()
@@ -75,6 +87,7 @@ async def run_intake(
         "messages": [],
         "raw_text": raw_text,
         "sender": sender,
+        "sender_nickname": None,
         "intent": None,
         "confidence": 0.0,
         "entities": {},
