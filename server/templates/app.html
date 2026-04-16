@@ -78,6 +78,12 @@
           </button>
         </template>
       </div>
+      <button
+        @click="skipNicknameSelector"
+        class="w-full rounded-xl border border-slate-200 py-2 text-sm text-slate-600"
+      >
+        Ahora no
+      </button>
     </div>
   </div>
 
@@ -681,8 +687,8 @@
           this.routines = Array.isArray(routines) ? routines : []
           this.tasks = Array.isArray(tasks) ? tasks : []
 
-          // Show nickname selector if no nickname is saved
-          if (this.user && !this.userNickname) {
+          // Show nickname selector only when we have members to choose from
+          if (this.user && !this.userNickname && this.family.length > 0) {
             this.showNicknameSelector = true
           }
         },
@@ -690,6 +696,10 @@
         selectUserNickname(nickname) {
           this.userNickname = nickname
           localStorage.setItem('famapp_user_nickname', nickname)
+          this.showNicknameSelector = false
+        },
+
+        skipNicknameSelector() {
           this.showNicknameSelector = false
         },
 
