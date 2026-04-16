@@ -36,7 +36,7 @@
     .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 16px); }
   </style>
 </head>
-<body class="bg-appBg min-h-screen text-slate-800" x-data="famapp()" x-init="init()" x-cloak>
+<body class="bg-appBg min-h-screen text-slate-800" x-data="famapp" x-cloak>
   <div x-show="loading" class="fixed inset-0 z-50 bg-appBg flex items-center justify-center">
     <p class="text-sm text-slate-500">Cargando FamApp…</p>
   </div>
@@ -566,8 +566,8 @@
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     const AR_TZ = 'America/Argentina/Buenos_Aires'
 
-    function famapp() {
-      return {
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('famapp', () => ({
         loading: true,
         user: null,
         token: null,
@@ -1408,8 +1408,8 @@
           const names = { home: 'Inicio', agenda: 'Agenda', shopping: 'Compras', routines: 'Rutinas', more: 'Configuración' }
           return names[this.view] || 'FamApp'
         },
-      }
-    }
+      }))
+    })
   </script>
 </body>
 </html>
