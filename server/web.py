@@ -17,6 +17,7 @@ from agents.logistics.maps_client import get_travel_time
 from agents.tasks.suggestions import generate_task_suggestions, filter_duplicate_suggestions
 from core.config import get_settings
 from core.models import CalendarEvent, ShoppingItem
+from core.privacy import mask_phone
 from server.local_store import (
     delete_place as local_delete_place,
     list_places as local_list_places,
@@ -557,7 +558,7 @@ async def api_family(user=Depends(require_auth)):
             "name": m.name,
             "nickname": m.nickname,
             "role": "Menor" if m.is_minor else "Adulto",
-            "phone": m.whatsapp_number.replace("whatsapp:", ""),
+            "phone": mask_phone(m.whatsapp_number),  # masked: never enviar número completo al browser
             "is_minor": m.is_minor,
         }
         for m in members
@@ -578,27 +579,45 @@ async def save_family_member(payload: Dict[str, Any] = Body(...), user=Depends(r
         raise HTTPException(status_code=400, detail="name es obligatorio")
 
     nickname = (payload.get("nickname") or name).strip().lower().replace(" ", "_")
-    whatsapp_number = (payload.get("phone") or "").strip()
-    if whatsapp_number and not whatsapp_number.startswith("whatsapp:"):
-        whatsapp_number = f"whatsapp:{whatsapp_number}"
+    raw_phone = (payload.get("phone") or "").strip()
 
-    member_payload = {
-        "name": name,
-        "nickname": nickname,
-        "whatsapp_number": whatsapp_number or "whatsapp:+540000000000",
-        "is_minor": bool(payload.get("is_minor", False)),
-    }
-    if payload.get("id"):
-        member_payload["id"] = payload["id"]
+    # Sólo actualizar el teléfono si se envía un número nuevo (sin enmascarar).
+    # Un valor enmascarado contiene '*' y significa que el usuario no lo cambió.
+    phone_is_new = bool(raw_phone) and "*" not in raw_phone
+    if phone_is_new:
+        whatsapp_number = raw_phone if raw_phone.startswith("whatsapp:") else f"whatsapp:{raw_phone}"
+    else:
+        whatsapp_number = None  # no actualizar
 
+    member_id = payload.get("id")
     client = get_supabase()
-    result = client.table("family_members").upsert(member_payload).execute()
+
+    if member_id:
+        # Update: sólo pisar los campos enviados; teléfono sólo si cambió
+        update_data: Dict[str, Any] = {
+            "name": name,
+            "nickname": nickname,
+            "is_minor": bool(payload.get("is_minor", False)),
+        }
+        if whatsapp_number is not None:
+            update_data["whatsapp_number"] = whatsapp_number
+        result = client.table("family_members").update(update_data).eq("id", member_id).execute()
+    else:
+        # Insert: teléfono obligatorio
+        member_payload: Dict[str, Any] = {
+            "name": name,
+            "nickname": nickname,
+            "whatsapp_number": whatsapp_number or "whatsapp:+540000000000",
+            "is_minor": bool(payload.get("is_minor", False)),
+        }
+        result = client.table("family_members").insert(member_payload).execute()
+
     member = result.data[0]
     return {
         "id": member["id"],
         "name": member["name"],
         "nickname": member["nickname"],
-        "phone": member["whatsapp_number"].replace("whatsapp:", ""),
+        "phone": mask_phone(member["whatsapp_number"]),  # siempre enmascarado en respuesta
         "is_minor": member["is_minor"],
     }
 

@@ -68,6 +68,32 @@ async def enforce_https(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses to reduce information leakage."""
+    response = await call_next(request)
+    # Prevent MIME sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Deny framing (clickjacking protection)
+    response.headers["X-Frame-Options"] = "DENY"
+    # Limit referrer information sent to third parties
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Disable browser features not used by the app
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    # CSP: allow scripts only from trusted CDNs and same-origin; block inline eval()
+    # Note: Alpine.js requires 'unsafe-inline' for x-* directives; Tailwind CDN injects styles.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.tailwindcss.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
+        "frame-ancestors 'none';"
+    )
+    return response
+
+
 # ── Twilio signature validation ───────────────────────────────────────────────
 
 def _validate_twilio_signature(request: Request, form_data: dict) -> bool:

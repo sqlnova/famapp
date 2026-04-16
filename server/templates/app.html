@@ -440,7 +440,9 @@
           <div x-show="showMemberForm" class="space-y-2 mb-3 border-b border-slate-100 pb-3">
             <input x-model="memberForm.name" placeholder="Nombre" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
             <input x-model="memberForm.nickname" placeholder="Apodo (opcional)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-            <input x-model="memberForm.phone" placeholder="+54911..." class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="memberForm.phone"
+                   :placeholder="memberForm._phoneMasked ? `Actual: ${memberForm._phoneMasked} · ingresá uno nuevo para cambiar` : '+54911...'"
+                   class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
             <label class="flex items-center gap-2 text-sm">
               <input type="checkbox" x-model="memberForm.is_minor">
               Es menor de edad
@@ -454,7 +456,7 @@
             <div class="py-2 border-b border-slate-100 last:border-b-0 flex justify-between text-sm gap-2">
               <div>
                 <p class="font-medium" x-text="m.name"></p>
-                <p class="text-slate-500" x-text="`${m.role} · ${maskPhone(m.phone)}`"></p>
+                <p class="text-slate-500" x-text="`${m.role} · ${m.phone || '-'}`"></p>
               </div>
               <div class="flex flex-col items-end">
                 <button @click="editMember(m)" class="text-xs text-iosBlue">Editar</button>
@@ -645,7 +647,6 @@
           this.userNickname = nickname
           localStorage.setItem('famapp_user_nickname', nickname)
           this.showNicknameSelector = false
-          console.log('User nickname set to:', nickname)
         },
 
         async addShopping() {
@@ -701,7 +702,8 @@
             id: member.id,
             name: member.name,
             nickname: member.nickname || '',
-            phone: member.phone || '',
+            phone: '',  // dejar vacío; sólo enviar si se quiere cambiar el número
+            _phoneMasked: member.phone || '',  // referencia visual, nunca se envía
             is_minor: member.is_minor,
           }
         },
@@ -791,8 +793,6 @@
             apply_to_series: this.eventForm.apply_to_series,
           }
 
-          console.log('saveEvent: saving with payload', payload)
-
           // Create or update
           let result
           if (this.eventForm.id) {
@@ -801,8 +801,6 @@
             result = await this.api(`/events`, { method: 'POST', body: JSON.stringify(payload) })
           }
 
-          console.log('saveEvent: API response', result)
-
           this.showEventForm = false
 
           // Fetch task suggestions based on the event
@@ -810,22 +808,16 @@
 
           // If no suggestions, reload and finish
           if (this.suggestedTasks.length === 0) {
-            console.log('saveEvent: no suggestions, loading data')
             await this.loadData()
-          } else {
-            console.log('saveEvent: showing suggestions modal')
           }
           // Otherwise, the modal stays open for user to select tasks
         },
 
         async suggestTasksForEvent(eventPayload) {
-          console.log('suggestTasksForEvent: requesting suggestions for', eventPayload.title)
           const suggestions = await this.api('/tasks/suggestions', {
             method: 'POST',
             body: JSON.stringify(eventPayload)
           })
-
-          console.log('suggestTasksForEvent: received suggestions', suggestions)
 
           if (suggestions && suggestions.suggestions && suggestions.suggestions.length > 0) {
             this.suggestedTasks = suggestions.suggestions.map((s, idx) => ({
@@ -835,23 +827,17 @@
             }))
             this.selectedSuggestions = []
             this.showTaskSuggestions = true
-            console.log('suggestTasksForEvent: showing modal with', this.suggestedTasks.length, 'suggestions')
-          } else {
-            console.log('suggestTasksForEvent: no suggestions received')
           }
         },
 
         toggleSuggestion(idx) {
           this.suggestedTasks[idx].selected = !this.suggestedTasks[idx].selected
-          console.log('toggleSuggestion:', idx, 'now:', this.suggestedTasks[idx].selected)
         },
 
         async createSuggestedTasks() {
           const tasksToCreate = this.suggestedTasks.filter(t => t.selected)
-          console.log('createSuggestedTasks: creating', tasksToCreate.length, 'tasks')
 
           for (const task of tasksToCreate) {
-            console.log('createSuggestedTasks: creating task', task.title)
             await this.api('/tasks', {
               method: 'POST',
               body: JSON.stringify({
@@ -862,8 +848,6 @@
               })
             })
           }
-
-          console.log('createSuggestedTasks: finished, closing modal and reloading')
           this.showTaskSuggestions = false
           this.suggestedTasks = []
           this.selectedSuggestions = []
@@ -1256,12 +1240,9 @@
           // Find the next departure
           if (departures.length > 0) {
             departures.sort((a, b) => a.time - b.time)
-            const next = departures[0]
-            console.log('nextDepartureLabel: next departure', next, 'myNickname:', mine, 'routines:', routines)
-            return this.fmtTime(next.time.toISOString())
+            return this.fmtTime(departures[0].time.toISOString())
           }
 
-          console.log('nextDepartureLabel: no departures found', 'myNickname:', mine, 'events:', events.length, 'routines:', routines.length)
           return 'Sin salidas asignadas'
         },
 
