@@ -279,7 +279,10 @@
         </div>
 
         <!-- Task Suggestions Modal -->
-        <div x-show="showTaskSuggestions" class="fixed inset-0 z-50 bg-black/30 flex items-end">
+        <div x-show="showTaskSuggestions"
+             @click.self="cancelSuggestions"
+             @keydown.escape.window="cancelSuggestions()"
+             class="fixed inset-0 z-50 bg-black/30 flex items-end">
           <div class="w-full bg-white rounded-t-3xl p-4 space-y-3 max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-2">
               <h3 class="font-semibold text-lg">Tareas sugeridas para este evento</h3>
@@ -565,6 +568,8 @@
 
         async init() {
           this.selectedAgendaDate = this.toDateKey(new Date())
+          this.showTaskSuggestions = false  // safety reset on every load
+          this.suggestedTasks = []
           // Load saved nickname from localStorage
           this.userNickname = localStorage.getItem('famapp_user_nickname') || ''
           const { data: { session } } = await sb.auth.getSession()
@@ -814,19 +819,24 @@
         },
 
         async suggestTasksForEvent(eventPayload) {
-          const suggestions = await this.api('/tasks/suggestions', {
-            method: 'POST',
-            body: JSON.stringify(eventPayload)
-          })
+          try {
+            const suggestions = await this.api('/tasks/suggestions', {
+              method: 'POST',
+              body: JSON.stringify(eventPayload)
+            })
 
-          if (suggestions && suggestions.suggestions && suggestions.suggestions.length > 0) {
-            this.suggestedTasks = suggestions.suggestions.map((s, idx) => ({
-              ...s,
-              id: idx,
-              selected: false
-            }))
-            this.selectedSuggestions = []
-            this.showTaskSuggestions = true
+            if (suggestions && suggestions.suggestions && suggestions.suggestions.length > 0) {
+              this.suggestedTasks = suggestions.suggestions.map((s, idx) => ({
+                ...s,
+                id: idx,
+                selected: false
+              }))
+              this.selectedSuggestions = []
+              this.showTaskSuggestions = true
+            }
+          } catch (_err) {
+            // Si falla la API de sugerencias, ignorar y continuar sin abrir el modal
+            this.showTaskSuggestions = false
           }
         },
 
