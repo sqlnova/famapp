@@ -216,6 +216,38 @@ def _suggest_departure_for_routine(time_str: str, location: Optional[str]) -> Op
         return None
 
 
+_ROUTINE_ID_TAG = "[routine_id:"
+
+
+def _build_routine_event_description(routine_id: str, leg: str, routine_title: str) -> str:
+    clean_leg = "outbound" if leg == "outbound" else "return"
+    return f"[routine_id:{routine_id}]\n[routine_leg:{clean_leg}]\n[routine_title:{routine_title}]"
+
+
+def _delete_existing_routine_mirror_events(routine_id: str) -> None:
+    """Delete previously mirrored calendar events for a routine."""
+    rid = (routine_id or "").strip()
+    if not rid:
+        return
+
+    routine_tag = f"{_ROUTINE_ID_TAG}{rid}]"
+    try:
+        upcoming = list_upcoming_events(days=365, max_results=400)
+    except Exception:
+        logger.exception("routine_mirror_cleanup_list_failed", routine_id=rid)
+        return
+
+    for event in upcoming:
+        if routine_tag not in (event.description or ""):
+            continue
+        if not event.id:
+            continue
+        try:
+            delete_event(event.id)
+        except Exception:
+            logger.exception("routine_mirror_cleanup_delete_failed", routine_id=rid, event_id=event.id)
+
+
 def _infer_user_nickname(user: Any) -> Optional[str]:
     """Best-effort map from auth email to family nickname."""
     email = (getattr(user, "email", "") or "").strip().lower()
@@ -997,45 +1029,48 @@ async def api_save_routine(payload: Dict[str, Any] = Body(...), user=Depends(req
                 else:
                     raise HTTPException(status_code=503, detail="No se pudo guardar la rutina en la base de datos.")
 
-    if is_new:
-        try:
-            rrule = _rrule_weekly(routine_obj["days"])
-            if rrule:
-                place_label = routine_obj["place_name"] or routine_obj["place_alias"] or "actividad"
-                known_places = {p.alias: p for p in get_all_known_places()}
-                location = resolve_place_address(routine_obj["place_alias"] or routine_obj["place_name"] or "", known_places) or routine_obj["place_name"]
-                children = routine_obj["children"] or []
-                people = ", ".join(children) if children else "los chicos"
+    try:
+        rrule = _rrule_weekly(routine_obj["days"])
+        if rrule:
+            routine_id = str(routine_obj.get("id") or "")
+            if routine_id:
+                _delete_existing_routine_mirror_events(routine_id)
 
-                # Calculate start_date as the next occurrence of the scheduled days
-                start_date = _get_next_occurrence_date(routine_obj["days"])
+            place_label = routine_obj["place_name"] or routine_obj["place_alias"] or "actividad"
+            known_places = {p.alias: p for p in get_all_known_places()}
+            location = resolve_place_address(routine_obj["place_alias"] or routine_obj["place_name"] or "", known_places) or routine_obj["place_name"]
+            children = routine_obj["children"] or []
+            people = ", ".join(children) if children else "los chicos"
+            start_date = _get_next_occurrence_date(routine_obj["days"])
 
-                if routine_obj["outbound_time"]:
-                    t0 = _to_hhmm(routine_obj["outbound_time"], "07:30")
-                    start0 = AR_TZ.localize(datetime.fromisoformat(f"{start_date}T{t0}:00"))
-                    event0 = CalendarEvent(
-                        title=f"Llevar a {people} al {place_label}",
-                        start=start0,
-                        end=start0 + timedelta(minutes=15),
-                        location=location,
-                        responsible_nickname=routine_obj["outbound_responsible"],
-                        children=children,
-                    )
-                    create_event(event0, recurrence=[rrule])
-                if routine_obj["return_time"]:
-                    t1 = _to_hhmm(routine_obj["return_time"], "12:00")
-                    start1 = AR_TZ.localize(datetime.fromisoformat(f"{start_date}T{t1}:00"))
-                    event1 = CalendarEvent(
-                        title=f"Buscar a {people} del {place_label}",
-                        start=start1,
-                        end=start1 + timedelta(minutes=15),
-                        location=location,
-                        responsible_nickname=routine_obj["return_responsible"],
-                        children=children,
-                    )
-                    create_event(event1, recurrence=[rrule])
-        except Exception:
-            logger.exception("routine_mirror_events_failed")
+            if routine_obj["outbound_time"]:
+                t0 = _to_hhmm(routine_obj["outbound_time"], "07:30")
+                start0 = AR_TZ.localize(datetime.fromisoformat(f"{start_date}T{t0}:00"))
+                event0 = CalendarEvent(
+                    title=f"Llevar a {people} al {place_label}",
+                    start=start0,
+                    end=start0 + timedelta(minutes=15),
+                    location=location,
+                    responsible_nickname=routine_obj["outbound_responsible"],
+                    children=children,
+                    description=_build_routine_event_description(routine_id, "outbound", routine_obj["title"]),
+                )
+                create_event(event0, recurrence=[rrule])
+            if routine_obj["return_time"]:
+                t1 = _to_hhmm(routine_obj["return_time"], "12:00")
+                start1 = AR_TZ.localize(datetime.fromisoformat(f"{start_date}T{t1}:00"))
+                event1 = CalendarEvent(
+                    title=f"Buscar a {people} del {place_label}",
+                    start=start1,
+                    end=start1 + timedelta(minutes=15),
+                    location=location,
+                    responsible_nickname=routine_obj["return_responsible"],
+                    children=children,
+                    description=_build_routine_event_description(routine_id, "return", routine_obj["title"]),
+                )
+                create_event(event1, recurrence=[rrule])
+    except Exception:
+        logger.exception("routine_mirror_events_failed", is_new=is_new, routine_id=routine_obj.get("id"))
 
     return routine_obj
 

@@ -749,6 +749,9 @@
             role: 'assistant',
             text: reply,
           })
+          if (!result?.__error) {
+            await this.loadData()
+          }
           this.agentLoading = false
         },
 
@@ -1008,8 +1011,22 @@
         async saveRoutine() {
           const days = this.normalizeRoutineDays(this.routineForm.daysInput)
           const children = this.routineForm.childrenInput.split(',').map((c) => c.trim()).filter(Boolean)
-          if (!this.routineForm.title.trim() || days.length === 0 || !this.routineForm.outbound_time || !this.routineForm.return_time || !this.routineForm.outbound_responsible || !this.routineForm.return_responsible || !this.routineForm.place_name || children.length === 0) {
-            window.alert('Completá todos los campos: título, días, horas, responsables, hijos y lugar.')
+          const hasOutbound = !!this.routineForm.outbound_time
+          const hasReturn = !!this.routineForm.return_time
+          if (!this.routineForm.title.trim() || days.length === 0 || !this.routineForm.place_name || children.length === 0) {
+            window.alert('Completá los campos obligatorios: título, días, hijos y lugar.')
+            return
+          }
+          if (!hasOutbound && !hasReturn) {
+            window.alert('Definí al menos una hora: ida o vuelta.')
+            return
+          }
+          if (hasOutbound && !this.routineForm.outbound_responsible) {
+            window.alert('Falta el responsable de llevar (ida).')
+            return
+          }
+          if (hasReturn && !this.routineForm.return_responsible) {
+            window.alert('Falta el responsable de buscar (vuelta).')
             return
           }
           const payload = {
