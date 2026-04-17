@@ -14,7 +14,7 @@ from agents.logistics.maps_client import get_travel_time
 from agents.schedule.calendar_client import AR_TZ, get_events_in_window
 from core.config import get_settings
 from core.models import CalendarEvent
-from core.supabase_client import get_family_member_by_nickname, get_supabase
+from core.supabase_client import get_family_member_by_nickname, get_known_places_dict, get_supabase, resolve_place_address
 from core.whatsapp import broadcast_whatsapp_message
 
 logger = structlog.get_logger(__name__)
@@ -34,6 +34,15 @@ def _alert_already_scheduled(calendar_event_id: str) -> bool:
         .execute()
     )
     return len(result.data) > 0
+
+
+def _resolve_location(raw_location: str) -> str:
+    """Resolve a place alias to its full address via known_places table."""
+    try:
+        known = get_known_places_dict()
+        return resolve_place_address(raw_location, known)
+    except Exception:
+        return raw_location
 
 
 def _resolve_responsible_whatsapp(event: CalendarEvent) -> Optional[str]:
@@ -106,9 +115,10 @@ async def schedule_manual_alert(event: CalendarEvent) -> str:
     s = get_settings()
     now = datetime.now(timezone.utc)
     responsible_wa = _resolve_responsible_whatsapp(event)
+    resolved_location = _resolve_location(event.location)
 
     try:
-        travel = get_travel_time(destination=event.location, departure_time=now)
+        travel = get_travel_time(destination=resolved_location, departure_time=now)
     except Exception:
         logger.exception("manual_alert_maps_error", event=event.title, location=event.location)
         return f"No pude calcular el tiempo de viaje a '{event.location}'. Intentá de nuevo."
@@ -156,10 +166,11 @@ async def _process_event(event: CalendarEvent) -> None:
     s = get_settings()
     now = datetime.now(timezone.utc)
     responsible_wa = _resolve_responsible_whatsapp(event)
+    resolved_location = _resolve_location(event.location)
 
     try:
         travel = get_travel_time(
-            destination=event.location,
+            destination=resolved_location,
             departure_time=now,
         )
     except Exception:
@@ -259,7 +270,7 @@ async def check_and_send_due_alerts() -> None:
             leave_at_str = ""
             try:
                 from agents.logistics.maps_client import get_travel_time
-                fresh = get_travel_time(destination=destination, departure_time=now)
+                fresh = get_travel_time(destination=_resolve_location(destination), departure_time=now)
                 travel_min = fresh.duration_minutes
                 route_summary = fresh.summary  # e.g. "Av. Corrientes"
                 if start_dt:
