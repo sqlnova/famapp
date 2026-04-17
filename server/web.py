@@ -45,7 +45,7 @@ from core.supabase_client import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/app")
-templates = Jinja2Templates(directory="server/templates")
+templates = Jinja2Templates(directory="server/templates", auto_reload=True)
 
 
 def _allow_local_fallback() -> bool:
@@ -359,11 +359,13 @@ async def index(request: Request):
             "<h2>Web UI no configurada. Agregá SUPABASE_ANON_KEY a las variables de entorno.</h2>",
             status_code=503,
         )
-    return templates.TemplateResponse("app.html", {
+    response = templates.TemplateResponse("app.html", {
         "request": request,
         "supabase_url": s.supabase_url,
         "supabase_anon_key": s.supabase_anon_key,
     })
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # ── API ───────────────────────────────────────────────────────────────────────
