@@ -29,7 +29,7 @@
       }
     }
   </script>
-  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     [x-cloak] { display: none !important; }
@@ -268,14 +268,14 @@
 
         <div x-show="showEventForm" class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
           <h3 class="font-medium" x-text="eventForm.id ? 'Editar evento' : 'Crear evento'"></h3>
-          <input :value="eventForm.title" @input="eventForm.title = $event.target.value" placeholder="Título" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <input :value="eventForm.start" @change="eventForm.start = $event.target.value" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <input :value="eventForm.end" @change="eventForm.end = $event.target.value" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <input :value="eventForm.location" @input="eventForm.location = $event.target.value" placeholder="Lugar" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <input :value="eventForm.responsible_nickname" @input="eventForm.responsible_nickname = $event.target.value" placeholder="Responsable (apodo)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <input :value="eventForm.childrenInput" @input="eventForm.childrenInput = $event.target.value" placeholder="Hijos (ej: Giuseppe,Gaetano)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.title" placeholder="Título" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.start" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.end" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.location" placeholder="Lugar" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.responsible_nickname" placeholder="Responsable (apodo)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input x-model="eventForm.childrenInput" placeholder="Hijos (ej: Giuseppe,Gaetano)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <label class="flex items-center gap-2 text-sm" x-show="eventForm.recurring_event_id">
-            <input type="checkbox" :checked="eventForm.apply_to_series" @change="eventForm.apply_to_series = $event.target.checked">
+            <input type="checkbox" x-model="eventForm.apply_to_series">
             Aplicar cambios a toda la serie
           </label>
           <div class="flex gap-2">
