@@ -190,29 +190,30 @@ def _suggest_departure(start: datetime, location: Optional[str]) -> str:
 
 
 def _suggest_departure_for_routine(time_str: str, location: Optional[str]) -> Optional[str]:
-    """Calculate departure time for a routine action given time string (HH:MM format)."""
-    if not time_str:
+    """Calculate next departure time for a recurring routine.
+
+    Rutinas se repiten día tras día, así que si la hora de hoy ya pasó,
+    devolvemos la sugerencia para la próxima ocurrencia (mañana).
+    """
+    if not time_str or ":" not in time_str:
         return None
     try:
-        # Parse time string and create datetime for today
-        h, m = map(int, time_str.split(':'))
+        h, m = map(int, time_str.split(':')[:2])
+        if not (0 <= h < 24 and 0 <= m < 60):
+            return None
         now = datetime.now(AR_TZ)
         action_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
 
-        # Skip if action time is in the past
+        # Si hoy ya pasó, correr a la próxima ocurrencia (mañana)
         if action_time <= now:
-            return None
+            action_time = action_time + timedelta(days=1)
 
-        # Calculate departure time
         departure_iso = _suggest_departure(action_time, location)
         departure_time = datetime.fromisoformat(departure_iso)
-
-        # Skip if calculated departure time is also in the past
         if departure_time <= now:
             return None
-
         return departure_iso
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, TypeError):
         return None
 
 

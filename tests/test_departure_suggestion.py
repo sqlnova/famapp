@@ -6,7 +6,6 @@ from agents.schedule.calendar_client import AR_TZ
 
 def test_suggest_departure_for_routine_future_time():
     """Test that future times get departure suggestions."""
-    # Set up a time that's definitely in the future (tomorrow at 10 AM)
     tomorrow = datetime.now(AR_TZ) + timedelta(days=1)
     time_str = f"{tomorrow.hour:02d}:{tomorrow.minute:02d}"
 
@@ -14,17 +13,17 @@ def test_suggest_departure_for_routine_future_time():
     assert result is not None, f"Should calculate departure for future time {time_str}"
     assert isinstance(result, str), "Should return ISO format string"
 
-    # Parse back and verify it's before the action time
-    action_time = datetime.fromisoformat(time_str.replace(":", "") + "00").astimezone(AR_TZ)
     departure_time = datetime.fromisoformat(result)
-    assert departure_time < action_time, "Departure should be before action time"
+    assert departure_time > datetime.now(AR_TZ), "Departure should be in the future"
 
 
-def test_suggest_departure_for_routine_past_time():
-    """Test that past times don't get departure suggestions."""
-    # Set up a time that's in the past
+def test_suggest_departure_for_routine_past_time_rolls_over():
+    """Past times should roll over to the next day (routines are recurring)."""
+    # Arbitrary time; the function must suggest the next occurrence.
     result = web._suggest_departure_for_routine("06:00", None)
-    assert result is None, "Should not suggest departure for past time"
+    assert result is not None, "Recurring routines should roll over to next day"
+    departure = datetime.fromisoformat(result)
+    assert departure > datetime.now(AR_TZ), "Departure must be in the future"
 
 
 def test_suggest_departure_for_routine_soon_time():
