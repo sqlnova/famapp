@@ -34,6 +34,7 @@ from core.supabase_client import (
     get_family_members,
     get_pending_shopping_items,
     get_supabase,
+    get_known_places_dict,
     list_family_routines,
     resolve_place_address,
     mark_shopping_item_done,
@@ -178,7 +179,9 @@ def _suggest_departure(start: datetime, location: Optional[str]) -> str:
     minutes_before = 30
     if location:
         try:
-            travel = get_travel_time(destination=location, departure_time=start.astimezone(timezone.utc))
+            known = get_known_places_dict()
+            resolved = resolve_place_address(location, known)
+            travel = get_travel_time(destination=resolved, departure_time=start.astimezone(timezone.utc))
             minutes_before = max(15, travel.duration_minutes + 10)
         except Exception:
             logger.info("maps_fallback_departure", location=location)

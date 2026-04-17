@@ -217,14 +217,34 @@ def update_event(event_id: str, updates: dict[str, Any]) -> CalendarEvent:
 
         if "title" in updates and updates["title"] is not None:
             body["summary"] = updates["title"]
-        if "start" in updates and updates["start"] is not None:
+
+        # When updating a master recurring event, preserve its anchor date and
+        # only apply the new time-of-day. This keeps all instances on their
+        # original calendar dates while changing the daily start/end time.
+        is_master = bool(body.get("recurrence"))
+        new_start = updates.get("start")
+        new_end = updates.get("end")
+        if new_start is not None and is_master and body.get("start", {}).get("dateTime"):
+            master_anchor = datetime.fromisoformat(body["start"]["dateTime"])
+            instance_time = new_start.astimezone(AR_TZ)
+            new_start = master_anchor.replace(
+                hour=instance_time.hour,
+                minute=instance_time.minute,
+                second=0,
+                microsecond=0,
+            )
+            if new_end is not None:
+                duration = updates["end"] - updates["start"]
+                new_end = new_start + duration
+
+        if new_start is not None:
             body["start"] = {
-                "dateTime": _to_utc_rfc3339(updates["start"]),
+                "dateTime": _to_utc_rfc3339(new_start),
                 "timeZone": "America/Argentina/Buenos_Aires",
             }
-        if "end" in updates and updates["end"] is not None:
+        if new_end is not None:
             body["end"] = {
-                "dateTime": _to_utc_rfc3339(updates["end"]),
+                "dateTime": _to_utc_rfc3339(new_end),
                 "timeZone": "America/Argentina/Buenos_Aires",
             }
         if "location" in updates:
