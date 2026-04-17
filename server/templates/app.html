@@ -74,7 +74,7 @@
             class="w-full text-left p-3 rounded-xl border-2 border-slate-200 hover:border-iosBlue hover:bg-iosBlue/5 transition"
             :class="userNickname === member.nickname ? 'border-iosBlue bg-iosBlue/10' : ''">
             <p class="font-medium" x-text="member.name"></p>
-            <p class="text-xs text-slate-500" x-text="`(${member.nickname})`"></p>
+            <p class="text-xs text-slate-500" x-text="'(' + member.nickname + ')'"></p>
           </button>
         </template>
       </div>
@@ -133,10 +133,10 @@
             <h3 class="font-medium">Tareas por miembro</h3>
             <span class="text-xs text-iosBlue">Hoy</span>
           </div>
-          <template x-for="m in family" :key="`task-${m.id}`">
+          <template x-for="m in family" :key="'task-' + m.id">
             <div class="mb-2">
               <p class="text-sm font-medium" x-text="m.name"></p>
-              <template x-for="item in memberTasks(m)" :key="`${m.id}-${item.id || item.title}-${item.start || item.due_date}`">
+              <template x-for="item in memberTasks(m)" :key="m.id + '-' + (item.id || item.title) + '-' + (item.start || item.due_date)">
                 <div class="flex items-center justify-between gap-2 text-sm text-slate-600">
                   <p>• <span x-text="item.title"></span></p>
                   <button x-show="item.id && !item.auto_generated" @click="markTaskDone(item.id)" class="text-xs text-iosBlue">Hecha</button>
@@ -152,7 +152,7 @@
               <input x-model="newTask.title" placeholder="Nueva tarea (ej: comprar regalo)" class="sm:col-span-6 rounded-xl border border-slate-200 px-3 py-2 text-sm w-full">
               <select x-model="newTask.assignee" class="sm:col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm w-full">
                 <option value="">Sin asignar</option>
-                <template x-for="m in family" :key="`task-opt-${m.id}`">
+                <template x-for="m in family" :key="'task-opt-' + m.id">
                   <option :value="m.nickname" x-text="m.name"></option>
                 </template>
               </select>
@@ -210,7 +210,7 @@
                 <p class="text-sm font-medium">Próximos eventos</p>
                 <button @click="jumpToNextEvent()" class="text-xs text-iosBlue">Ir al próximo</button>
               </div>
-              <template x-for="event in upcomingEvents(3)" :key="`upcoming-${event.id}-${event.start}`">
+              <template x-for="event in upcomingEvents(3)" :key="'upcoming-' + event.id + '-' + event.start">
                 <p class="text-xs text-slate-600">
                   <span class="font-medium" x-text="fmtAgendaDate(event.start)"></span> ·
                   <span x-text="event.title"></span>
@@ -230,9 +230,9 @@
                     <p class="text-[11px] text-slate-500" x-text="day.weekday"></p>
                     <p class="font-semibold text-sm" x-text="day.day"></p>
                   </div>
-                  <p class="text-[11px] text-iosBlue mt-1" x-text="`${day.events.length} tareas`"></p>
+                  <p class="text-[11px] text-iosBlue mt-1" x-text="day.events.length + ' tareas'"></p>
                   <div class="mt-2 space-y-1">
-                    <template x-for="event in day.events.slice(0,3)" :key="`${day.key}-${event.id || event.start}`">
+                    <template x-for="event in day.events.slice(0,3)" :key="day.key + '-' + (event.id || event.start)">
                       <p class="text-[11px] text-slate-600 truncate">
                         <span class="font-medium" x-text="fmtTime(event.start)"></span>
                         <span x-text="event.title"></span>
@@ -268,14 +268,14 @@
 
         <div x-show="showEventForm" class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
           <h3 class="font-medium" x-text="eventForm.id ? 'Editar evento' : 'Crear evento'"></h3>
-          <input x-model="eventForm.title" placeholder="Título" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <input x-model="eventForm.start" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <input x-model="eventForm.end" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <input x-model="eventForm.location" placeholder="Lugar" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <input x-model="eventForm.responsible_nickname" placeholder="Responsable (apodo)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <input x-model="eventForm.childrenInput" placeholder="Hijos (ej: Giuseppe,Gaetano)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input :value="eventForm.title" @input="eventForm.title = $event.target.value" placeholder="Título" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input :value="eventForm.start" @change="eventForm.start = $event.target.value" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input :value="eventForm.end" @change="eventForm.end = $event.target.value" type="datetime-local" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input :value="eventForm.location" @input="eventForm.location = $event.target.value" placeholder="Lugar" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input :value="eventForm.responsible_nickname" @input="eventForm.responsible_nickname = $event.target.value" placeholder="Responsable (apodo)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <input :value="eventForm.childrenInput" @input="eventForm.childrenInput = $event.target.value" placeholder="Hijos (ej: Giuseppe,Gaetano)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
           <label class="flex items-center gap-2 text-sm" x-show="eventForm.recurring_event_id">
-            <input type="checkbox" x-model="eventForm.apply_to_series">
+            <input type="checkbox" :checked="eventForm.apply_to_series" @change="eventForm.apply_to_series = $event.target.checked">
             Aplicar cambios a toda la serie
           </label>
           <div class="flex gap-2">
@@ -297,7 +297,7 @@
 
             <p class="text-sm text-slate-600 mb-4">Selecciona las tareas que quieres crear:</p>
 
-            <template x-for="(task, idx) in suggestedTasks" :key="`suggestion-${idx}`">
+            <template x-for="(task, idx) in suggestedTasks" :key="'suggestion-' + idx">
               <div class="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-100 transition"
                 @click="toggleSuggestion(idx)">
                 <input
@@ -506,7 +506,7 @@
             <div class="py-2 border-b border-slate-100 last:border-b-0 flex justify-between text-sm gap-2">
               <div>
                 <p class="font-medium" x-text="m.name"></p>
-                <p class="text-slate-500" x-text="`${m.role} · ${m.phone || '-'}`"></p>
+                <p class="text-slate-500" x-text="m.role + ' · ' + (m.phone || '-')"></p>
               </div>
               <div class="flex flex-col items-end">
                 <button @click="editMember(m)" class="text-xs text-iosBlue">Editar</button>
