@@ -378,6 +378,7 @@ def start_scheduler() -> AsyncIOScheduler:
         id="daily_summary",
         name="Daily morning summary at 7am AR",
         replace_existing=True,
+        misfire_grace_time=3600,  # run if missed by up to 1 hour (e.g. server restart)
     )
 
     _scheduler.start()

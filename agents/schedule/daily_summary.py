@@ -173,7 +173,13 @@ async def send_daily_summary() -> None:
     now_ar = datetime.now(AR_TZ)
     today = now_ar.date()
 
-    if _already_sent(today):
+    try:
+        already_sent = _already_sent(today)
+    except Exception:
+        logger.warning("daily_summary_already_sent_check_error", date=today.isoformat())
+        already_sent = False
+
+    if already_sent:
         logger.debug("daily_summary_already_sent", date=today.isoformat())
         return
 
@@ -181,20 +187,23 @@ async def send_daily_summary() -> None:
     today_end = today_start + timedelta(days=1)
     tomorrow_end = today_end + timedelta(days=1)
 
-    all_events = list_upcoming_events(days=2)
+    try:
+        week_events = list_upcoming_events(days=7)
+    except Exception:
+        logger.exception("daily_summary_calendar_error", date=today.isoformat())
+        week_events = []
+
     today_events = [
-        e for e in all_events
+        e for e in week_events
         if today_start <= e.start.astimezone(AR_TZ) < today_end
     ]
     tomorrow_events = [
-        e for e in all_events
+        e for e in week_events
         if today_end <= e.start.astimezone(AR_TZ) < tomorrow_end
     ]
 
     due_tasks, due_homework = _get_due_tasks_today()
 
-    # Check for child schedule conflicts in the next 7 days
-    week_events = list_upcoming_events(days=7)
     conflicts = _detect_child_conflicts(week_events, days_ahead=7)
 
     try:
