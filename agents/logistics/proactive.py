@@ -156,6 +156,11 @@ async def schedule_manual_alert(event: CalendarEvent) -> str:
 async def _process_event(event: CalendarEvent) -> None:
     """For a single calendar event, calculate travel time and fire alert if needed."""
     if not event.location or not event.id:
+        logger.debug(
+            "logistics_event_skipped",
+            event=event.title,
+            reason="no_location" if not event.location else "no_id",
+        )
         return
     # Recurring instances each have a unique event.id (e.g. base_id_YYYYMMDDTHHMMSSZ),
     # so _alert_already_scheduled() already prevents duplicates within the same occurrence.
@@ -163,6 +168,7 @@ async def _process_event(event: CalendarEvent) -> None:
         logger.debug("logistics_alert_exists", event=event.title)
         return
 
+    logger.info("logistics_scheduling_alert", event=event.title, location=event.location)
     s = get_settings()
     now = datetime.now(timezone.utc)
     responsible_wa = _resolve_responsible_whatsapp(event)
@@ -188,13 +194,21 @@ async def _process_event(event: CalendarEvent) -> None:
         # Too late to schedule – send immediately if departure is still ahead
         if leave_at > now:
             minutes_left = int((leave_at - now).total_seconds() / 60)
-            _fire_alert(event, travel.duration_minutes, minutes_left, responsible_wa)
-            _save_alert(event, now, travel.duration_minutes, leave_at, responsible_wa)
+            try:
+                _fire_alert(event, travel.duration_minutes, minutes_left, responsible_wa)
+                _save_alert(event, now, travel.duration_minutes, leave_at, responsible_wa)
+            except Exception:
+                logger.exception("logistics_immediate_alert_error", event=event.title)
+        else:
+            logger.info("logistics_event_past", event=event.title)
         return
 
     # Schedule future alert
-    _save_alert(event, send_at, travel.duration_minutes, leave_at, responsible_wa)
-    logger.info("logistics_alert_scheduled", event=event.title, send_at=send_at.isoformat())
+    try:
+        _save_alert(event, send_at, travel.duration_minutes, leave_at, responsible_wa)
+        logger.info("logistics_alert_scheduled", event=event.title, send_at=send_at.isoformat())
+    except Exception:
+        logger.exception("logistics_save_alert_error", event=event.title)
 
 
 def _fire_alert(
@@ -323,11 +337,19 @@ async def poll_calendar_and_schedule() -> None:
     try:
         s = get_settings()
         events = get_events_in_window(hours_ahead=s.logistics_lookahead_hours)
+        logger.info("logistics_events_in_window", count=len(events))
         for event in events:
-            await _process_event(event)
-        await check_and_send_due_alerts()
+            try:
+                await _process_event(event)
+            except Exception:
+                logger.exception("logistics_process_event_error", event=event.title)
     except Exception:
         logger.exception("logistics_scheduler_error")
+    # Always run due-alerts check regardless of event-scheduling errors above
+    try:
+        await check_and_send_due_alerts()
+    except Exception:
+        logger.exception("logistics_due_alerts_error")
 
 
 # ── Scheduler lifecycle ───────────────────────────────────────────────────────
