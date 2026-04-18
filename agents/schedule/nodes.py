@@ -54,6 +54,12 @@ En su lugar, creá SIEMPRE DOS eventos cortos (15 min cada uno):
   1. "Llevar [nombre] al [lugar]"  → a la hora de ENTRADA
   2. "Buscar/Retirar [nombre] del [lugar]" → a la hora de SALIDA
 
+IMPORTANTE — NO INVENTAR HORA DE RETIRO:
+Si el usuario da UNA SOLA hora (ej. "partido a las 10 am") y NO menciona hora
+de salida/retiro NI duración de la actividad, creá SOLO el evento "Llevar".
+No inventes una hora de retiro +15 min después — es absurdo y confunde al usuario.
+El usuario puede agregar el retiro después si lo necesita.
+
 Ejemplos:
   "Isabella va al colegio de 8:30 a 11:45, lleva y busca mamá"
   → Evento 1: "Llevar Isabella al colegio"  08:30–08:45  responsible: mama
@@ -62,6 +68,10 @@ Ejemplos:
   "Joaquina tiene fútbol los sábados de 10 a 12, la lleva papá y la busco yo"
   → Evento 1: "Llevar Joaquina al fútbol"  10:00–10:15  responsible: papa
   → Evento 2: "Buscar Joaquina del fútbol" 12:00–12:15  responsible: mama
+
+  "Agenda partido de Gaetano mañana a las 10 am, lleva papá"
+  → SOLO Evento 1: "Llevar Gaetano al partido"  10:00–10:15  responsible: papa
+  (NO crear evento de retirar — no se informó hora de salida)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EXCEPCIÓN — VIAJES / PARTIDAS (solo UN evento)
@@ -224,6 +234,44 @@ def _normalize_time_str(raw: Any, default: str = "09:00") -> str:
             return default
 
     return f"{hour:02d}:{minute:02d}"
+
+
+_PICKUP_TITLE_RE = re.compile(r"^\s*(retirar|buscar)\b", re.IGNORECASE)
+_DROPOFF_TITLE_RE = re.compile(r"^\s*llevar\b", re.IGNORECASE)
+
+
+def _drop_phantom_pickup(ev_list: List[Dict[str, Any]], raw_text: str) -> List[Dict[str, Any]]:
+    """Filtra eventos "Retirar/Buscar" que el LLM agregó sin que el usuario haya
+    dado una hora de retiro explícita.
+
+    Señal de bug: dos eventos (Llevar + Retirar) con menos de 30 min entre sí
+    y sin que en el texto del usuario haya información de rango horario.
+    """
+    if not ev_list or len(ev_list) < 2:
+        return ev_list
+    if _extract_time_range(raw_text):
+        return ev_list
+
+    filtered: List[Dict[str, Any]] = []
+    for ev in ev_list:
+        title = (ev.get("title") or "")
+        if not _PICKUP_TITLE_RE.search(title):
+            filtered.append(ev)
+            continue
+        pickup_time = _normalize_time_str(ev.get("time"), default="")
+        is_phantom = False
+        for other in ev_list:
+            if other is ev:
+                continue
+            if not _DROPOFF_TITLE_RE.search(other.get("title") or ""):
+                continue
+            dropoff_time = _normalize_time_str(other.get("time"), default="")
+            if pickup_time and dropoff_time and _minutes_between(dropoff_time, pickup_time) < 30:
+                is_phantom = True
+                break
+        if not is_phantom:
+            filtered.append(ev)
+    return filtered or ev_list
 
 
 def _extract_time_range(raw_text: str) -> Optional[tuple[str, str]]:
@@ -405,6 +453,10 @@ async def handle_schedule(
             ev_list = plan.get("events") or ([plan["event"]] if plan.get("event") else [])
             if not ev_list:
                 return "No pude entender qué evento crear. ¿Podés darme más detalles?"
+
+            # Red de seguridad: si el LLM devolvió Llevar + Retirar pegados (< 30 min)
+            # sin que el usuario diera hora de retiro explícita, descartamos el Retirar.
+            ev_list = _drop_phantom_pickup(ev_list, raw_text)
 
             created_msgs = []
             new_events_to_check: List[CalendarEvent] = []
