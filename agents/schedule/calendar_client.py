@@ -101,7 +101,7 @@ def _parse_event(raw: dict) -> CalendarEvent:
 
 def list_upcoming_events(
     days: int = 7,
-    max_results: int = 20,
+    max_results: int = 250,
 ) -> List[CalendarEvent]:
     """Return upcoming events for the next `days` days."""
     s = get_settings()
