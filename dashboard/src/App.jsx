@@ -1,17 +1,17 @@
 import { useMemo } from "react";
 import useMonitoringSocket from "./hooks/useMonitoringSocket.js";
-import Office from "./components/Office.jsx";
+import IsometricOffice from "./components/IsometricOffice.jsx";
 import EventFeed from "./components/EventFeed.jsx";
-import StatusBadge from "./components/StatusBadge.jsx";
+import AgentCard from "./components/AgentCard.jsx";
 
 const WS_URL =
   import.meta.env.VITE_MONITORING_WS_URL || "ws://localhost:8001/ws";
 
 const AGENTS = [
-  { key: "intake", label: "Intake Agent" },
-  { key: "schedule", label: "Schedule Agent" },
-  { key: "logistics", label: "Logistics Agent" },
-  { key: "shopping", label: "Shopping Agent" },
+  { key: "intake", label: "Intake", description: "Routing & classification" },
+  { key: "schedule", label: "Schedule", description: "Calendar operations" },
+  { key: "logistics", label: "Logistics", description: "Travel & alerts" },
+  { key: "shopping", label: "Shopping", description: "Grocery list" },
 ];
 
 export default function App() {
@@ -31,37 +31,60 @@ export default function App() {
     [agents],
   );
 
+  const connLabel =
+    connection === "open"
+      ? "Live"
+      : connection === "connecting"
+        ? "Connecting"
+        : "Offline";
+
   return (
     <div className="app">
       <header className="app-header">
-        <h1>FamApp • Agent Control Room</h1>
-        <span className={`conn conn-${connection}`}>
-          {connection === "open"
-            ? "● live"
-            : connection === "connecting"
-              ? "… connecting"
-              : "○ offline"}
-        </span>
+        <div className="brand">
+          <div className="brand-mark" aria-hidden="true" />
+          <div>
+            <div className="brand-title">FamApp</div>
+            <div className="brand-subtitle">Agent Monitoring</div>
+          </div>
+        </div>
+        <div className={`conn conn-${connection}`}>
+          <span className="conn-dot" />
+          {connLabel}
+        </div>
       </header>
 
       <main className="app-main">
-        <section className="office-panel">
-          <Office agents={agentList} />
-          <div className="badge-row">
+        <section className="left-col">
+          <div className="panel panel-office">
+            <div className="panel-header">
+              <h2>Overview</h2>
+              <span className="panel-hint">
+                {agentList.filter((a) => a.status === "active").length} active
+                · {agentList.filter((a) => a.status === "error").length} error
+              </span>
+            </div>
+            <IsometricOffice agents={agentList} />
+          </div>
+
+          <div className="agent-grid">
             {agentList.map((a) => (
-              <StatusBadge key={a.key} agent={a} />
+              <AgentCard key={a.key} agent={a} />
             ))}
           </div>
         </section>
 
-        <aside className="feed-panel">
-          <h2>Event Feed</h2>
+        <aside className="panel panel-feed">
+          <div className="panel-header">
+            <h2>Event feed</h2>
+            <span className="panel-hint">last 20</span>
+          </div>
           <EventFeed events={events} />
         </aside>
       </main>
 
       <footer className="app-footer">
-        <span>WS: {WS_URL}</span>
+        <span className="mono">{WS_URL}</span>
       </footer>
     </div>
   );

@@ -8,8 +8,7 @@ const AGENT_LABELS = {
 function formatTime(iso) {
   if (!iso) return "";
   try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString([], {
+    return new Date(iso).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
@@ -26,13 +25,18 @@ export default function EventFeed({ events }) {
   return (
     <ul className="feed-list">
       {events.map((e, i) => (
-        <li key={`${e.timestamp}-${i}`} className={`feed-item feed-${e.status}`}>
-          <span className="feed-time">{formatTime(e.timestamp)}</span>
-          <span className={`feed-agent agent-tag-${e.agent_name}`}>
-            {AGENT_LABELS[e.agent_name] || e.agent_name}
-          </span>
-          <span className={`feed-status status-${e.status}`}>{e.status}</span>
-          <span className="feed-message">{e.message || "—"}</span>
+        <li key={`${e.timestamp}-${i}`} className={`feed-row feed-${e.status}`}>
+          <div className="feed-row-head">
+            <span className={`feed-agent agent-${e.agent_name}`}>
+              {AGENT_LABELS[e.agent_name] || e.agent_name}
+            </span>
+            <span className={`feed-status status-${e.status}`}>
+              <span className="feed-status-dot" />
+              {e.status}
+            </span>
+            <span className="feed-time mono">{formatTime(e.timestamp)}</span>
+          </div>
+          <div className="feed-message">{e.message || "—"}</div>
         </li>
       ))}
     </ul>
