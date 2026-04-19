@@ -13,6 +13,7 @@ from core.intake_fallbacks import detect_fallback_route
 from core.config import get_settings
 from core.models import IntentType
 from agents.intake.state import IntakeState
+from famapp.monitoring import send_event
 
 logger = structlog.get_logger(__name__)
 
@@ -160,6 +161,7 @@ async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
     """LLM call to parse intent and extract entities.
     Includes message history and sender identity for context.
     """
+    await send_event("intake", "active", "Classifying incoming message")
     llm = _get_llm()
 
     # Resolve sender identity once per message
@@ -202,6 +204,8 @@ async def parse_and_classify(state: IntakeState) -> Dict[str, Any]:
         confidence=parsed.get("confidence", 0.0),
         entities=parsed.get("entities", {}),
     )
+
+    await send_event("intake", "idle", f"Intent={intent.value}")
 
     return {
         "messages": state["messages"] + [HumanMessage(content=state["raw_text"]), response],
@@ -332,6 +336,7 @@ async def handle_shopping(state: IntakeState) -> Dict[str, Any]:
     """Process shopping requests within Intake."""
     from agents.intake.tools import add_item_to_shopping_list, list_shopping_items, mark_all_items_done, mark_items_done
 
+    await send_event("shopping", "active", "Handling shopping request")
     entities = state.get("entities", {})
     action = _infer_shopping_action(entities, state.get("raw_text", ""))
     items = _extract_shopping_items(entities, state.get("raw_text", ""), action)
@@ -369,26 +374,34 @@ async def handle_shopping(state: IntakeState) -> Dict[str, Any]:
 
         else:
             response_text = await list_shopping_items.ainvoke({})
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "shopping_handler_error",
             raw_text=state.get("raw_text", ""),
             intent=(state.get("intent") or IntentType.UNKNOWN).value,
             entities=entities,
         )
+        await send_event("shopping", "error", f"Shopping failed: {exc}")
         raise
 
+    await send_event("shopping", "idle", f"action={action} items={len(items)}")
     return {"response_text": response_text, "route_to": "direct"}
 
 
 async def handle_schedule(state: IntakeState) -> Dict[str, Any]:
     """Delegate to the Schedule Agent (Google Calendar)."""
     from agents.schedule.nodes import handle_schedule as schedule_handler
-    response_text = await schedule_handler(
-        sender=state["sender"],
-        raw_text=state["raw_text"],
-        entities=state.get("entities", {}),
-    )
+    await send_event("schedule", "active", "Handling schedule request")
+    try:
+        response_text = await schedule_handler(
+            sender=state["sender"],
+            raw_text=state["raw_text"],
+            entities=state.get("entities", {}),
+        )
+    except Exception as exc:
+        await send_event("schedule", "error", f"Schedule failed: {exc}")
+        raise
+    await send_event("schedule", "idle", "Schedule request completed")
     return {"response_text": response_text, "route_to": "schedule"}
 
 
@@ -419,11 +432,17 @@ async def handle_places(state: IntakeState) -> Dict[str, Any]:
 async def handle_logistics(state: IntakeState) -> Dict[str, Any]:
     """Delegate to the Logistics Agent (Google Maps)."""
     from agents.logistics import handle_logistics_query
-    response_text = await handle_logistics_query(
-        sender=state["sender"],
-        entities=state.get("entities", {}),
-        message_sid=state["message_sid"],
-    )
+    await send_event("logistics", "active", "Handling logistics request")
+    try:
+        response_text = await handle_logistics_query(
+            sender=state["sender"],
+            entities=state.get("entities", {}),
+            message_sid=state["message_sid"],
+        )
+    except Exception as exc:
+        await send_event("logistics", "error", f"Logistics failed: {exc}")
+        raise
+    await send_event("logistics", "idle", "Logistics request completed")
     return {"response_text": response_text, "route_to": "logistics"}
 
 

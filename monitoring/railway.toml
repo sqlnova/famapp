@@ -1,0 +1,12 @@
+# Railway service config for the FamApp Monitoring backend.
+# Deploy this as a NEW service inside the existing FamApp Railway project.
+# Root directory should point to ./monitoring so this Procfile is used.
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "uvicorn monitoring.app:app --host 0.0.0.0 --port ${PORT:-8001}"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"

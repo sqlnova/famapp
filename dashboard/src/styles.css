@@ -1,0 +1,479 @@
+/* ------------------------------------------------------------------
+   FamApp Agent Monitoring — pixel-art isometric office theme
+   ------------------------------------------------------------------ */
+
+:root {
+  --bg: #0d0f1a;
+  --bg-soft: #151a2e;
+  --panel: #1c2140;
+  --panel-border: #2e3670;
+  --text: #e4e7ff;
+  --text-dim: #8c93c1;
+  --accent: #ffd76a;
+  --floor-a: #d9b97a;
+  --floor-b: #bd9a5c;
+  --wall: #3a406a;
+  --status-idle: #64748b;
+  --status-active: #22c55e;
+  --status-error: #ef4444;
+  --font-pixel: "Press Start 2P", monospace;
+  --font-read: "VT323", "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-read);
+  image-rendering: pixelated;
+  font-size: 18px;
+}
+
+.app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  background: var(--bg-soft);
+  border-bottom: 2px solid var(--panel-border);
+}
+
+.app-header h1 {
+  font-family: var(--font-pixel);
+  font-size: 14px;
+  margin: 0;
+  color: var(--accent);
+  letter-spacing: 1px;
+}
+
+.conn {
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: #000;
+}
+.conn-open {
+  color: var(--status-active);
+  border: 1px solid var(--status-active);
+}
+.conn-connecting {
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.conn-closed {
+  color: var(--status-error);
+  border: 1px solid var(--status-error);
+}
+
+.app-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 20px;
+  padding: 24px;
+}
+
+@media (max-width: 960px) {
+  .app-main {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Office ---------- */
+
+.office-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.office {
+  background:
+    linear-gradient(180deg, #1a2040 0%, #0d0f1a 100%);
+  border: 2px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 24px;
+  min-height: 520px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.office::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.02) 0,
+      rgba(255, 255, 255, 0.02) 2px,
+      transparent 2px,
+      transparent 6px
+    );
+  pointer-events: none;
+}
+
+.office-floor {
+  position: relative;
+  width: 640px;
+  height: 420px;
+  transform: rotateX(55deg) rotateZ(-45deg);
+  transform-style: preserve-3d;
+  background:
+    repeating-conic-gradient(
+      var(--floor-a) 0% 25%,
+      var(--floor-b) 0% 50%
+    ) 0 0 / 80px 80px;
+  border: 4px solid #5a3e1f;
+  box-shadow:
+    0 0 0 2px #2a1a0a,
+    0 40px 60px rgba(0, 0, 0, 0.6);
+}
+
+.office-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 0;
+}
+
+.desk-slot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+}
+
+/* ---------- Desk ---------- */
+
+.desk {
+  position: relative;
+  width: 180px;
+  height: 130px;
+  transform: rotateZ(45deg) rotateX(-55deg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  transition: filter 0.2s ease;
+}
+
+.desk-nameplate {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  color: var(--text);
+  background: #000;
+  border: 2px solid var(--panel-border);
+  padding: 4px 6px;
+  white-space: nowrap;
+  z-index: 3;
+}
+
+.desk-sprite-wrap {
+  position: absolute;
+  top: 0px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.agent-sprite {
+  width: 64px;
+  height: 80px;
+  display: block;
+}
+
+.desk-furniture {
+  width: 180px;
+  height: 110px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Active state — glow + gentle bob */
+.desk-active .agent-sprite {
+  animation: bob 1.1s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.9));
+}
+
+.active-glow {
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(34, 197, 94, 0.45) 0%,
+    rgba(34, 197, 94, 0) 70%
+  );
+  animation: pulse 1.6s ease-in-out infinite;
+  z-index: 0;
+  pointer-events: none;
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translate(-50%, 0);
+  }
+  50% {
+    transform: translate(-50%, -3px);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
+/* Error state — red tint + shake + indicator */
+.desk-error .agent-sprite {
+  animation: shake 0.35s ease-in-out infinite;
+  filter:
+    drop-shadow(0 0 6px rgba(239, 68, 68, 0.95))
+    hue-rotate(-30deg) saturate(1.6);
+}
+
+.error-indicator {
+  position: absolute;
+  top: -10px;
+  right: -18px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--status-error);
+  color: #fff;
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #000;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.9);
+  animation: flash 0.6s steps(2) infinite;
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translate(-50%, 0);
+  }
+  25% {
+    transform: translate(calc(-50% - 2px), 0);
+  }
+  75% {
+    transform: translate(calc(-50% + 2px), 0);
+  }
+}
+
+@keyframes flash {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Idle state — nothing extra, agent just sits. */
+
+/* ---------- Status badges row ---------- */
+
+.badge-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 700px) {
+  .badge-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.status-badge {
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-read);
+}
+
+.badge-name {
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  color: var(--text);
+}
+
+.badge-status {
+  font-size: 22px;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+
+.badge-time {
+  font-size: 16px;
+  color: var(--text-dim);
+}
+
+.badge-idle .badge-status {
+  color: var(--status-idle);
+}
+.badge-active {
+  border-color: var(--status-active);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.25);
+}
+.badge-active .badge-status {
+  color: var(--status-active);
+}
+.badge-error {
+  border-color: var(--status-error);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.35);
+}
+.badge-error .badge-status {
+  color: var(--status-error);
+}
+
+/* ---------- Event feed ---------- */
+
+.feed-panel {
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+}
+
+.feed-panel h2 {
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  color: var(--accent);
+  margin: 0 0 12px;
+  letter-spacing: 1px;
+}
+
+.feed-empty {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.feed-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+  max-height: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.feed-item {
+  display: grid;
+  grid-template-columns: 80px 90px 70px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  background: var(--bg-soft);
+  border-left: 4px solid var(--status-idle);
+  border-radius: 3px;
+  font-size: 16px;
+}
+
+.feed-active {
+  border-left-color: var(--status-active);
+}
+.feed-error {
+  border-left-color: var(--status-error);
+  background: rgba(239, 68, 68, 0.08);
+}
+.feed-idle {
+  border-left-color: var(--status-idle);
+}
+
+.feed-time {
+  color: var(--text-dim);
+  font-size: 14px;
+}
+.feed-agent {
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  padding: 2px 4px;
+  background: #000;
+  border-radius: 3px;
+  text-align: center;
+}
+.agent-tag-intake {
+  color: #3b82f6;
+}
+.agent-tag-schedule {
+  color: #a855f7;
+}
+.agent-tag-logistics {
+  color: #22c55e;
+}
+.agent-tag-shopping {
+  color: #f97316;
+}
+
+.feed-status {
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.status-idle {
+  color: var(--status-idle);
+}
+.status-active {
+  color: var(--status-active);
+}
+.status-error {
+  color: var(--status-error);
+}
+
+.feed-message {
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* ---------- Footer ---------- */
+
+.app-footer {
+  padding: 10px 24px;
+  font-size: 14px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--panel-border);
+  background: var(--bg-soft);
+}

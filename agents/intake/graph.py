@@ -23,6 +23,7 @@ from core.models import IntentType, MessageStatus
 from core.privacy import mask_phone, redact_text_meta
 from core.supabase_client import update_message_status
 from core.whatsapp import send_whatsapp_message
+from famapp.monitoring import send_event
 
 logger = structlog.get_logger(__name__)
 
@@ -129,13 +130,14 @@ async def run_intake(
 
         return response_text
 
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "intake_graph_error",
             message_sid=message_sid,
             sender=mask_phone(sender),
             raw_text_meta=redact_text_meta(raw_text),
         )
+        await send_event("intake", "error", f"Graph crashed: {exc}")
         await update_message_status(message_sid, MessageStatus.FAILED)
         error_msg = "Ocurrió un error procesando tu mensaje. Intentá de nuevo."
         send_whatsapp_message(sender, error_msg)
