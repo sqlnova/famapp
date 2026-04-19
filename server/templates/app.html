@@ -99,42 +99,118 @@
     </header>
 
     <main class="px-4 space-y-4">
-      <section x-show="view==='home'" class="space-y-4">
-        <div class="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm">
-          <p class="text-xs uppercase tracking-wide text-slate-400">Resumen de hoy</p>
-          <p class="text-2xl font-semibold mt-1" x-text="nextDepartureLabel()"></p>
-          <p class="text-sm text-slate-500">Próxima salida sugerida</p>
+      <!-- ── Centro de Operaciones Familiar ──────────────────────────── -->
+      <section x-show="view==='home'" class="space-y-3">
+
+        <!-- Pulso del día: estado + factibilidad -->
+        <div class="rounded-3xl p-5 border shadow-sm" :class="statusMeta().cls">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-xs uppercase tracking-wide opacity-70">Estado del día</p>
+              <p class="text-2xl font-semibold mt-1 flex items-center gap-2">
+                <span x-text="statusMeta().emoji"></span>
+                <span x-text="statusMeta().label"></span>
+              </p>
+            </div>
+            <button @click="loadPlan()" class="text-xs opacity-60 hover:opacity-100" title="Actualizar">↻</button>
+          </div>
+          <p class="text-sm opacity-80 mt-1" x-text="plan?.summary_es || (planLoading ? 'Calculando el plan…' : 'Aún sin datos del día.')"></p>
+          <p x-show="plan && plan.feasibility_score != null" class="text-xs opacity-60 mt-2">
+            Factibilidad: <span x-text="Math.round((plan?.feasibility_score ?? 0) * 100) + '%'"></span>
+          </p>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
-          <div class="bg-white rounded-3xl p-4 border border-slate-100">
-            <p class="text-xs text-slate-400">Eventos hoy</p>
-            <p class="text-2xl font-semibold" x-text="todayEvents().length"></p>
-          </div>
-          <div class="bg-white rounded-3xl p-4 border border-slate-100">
-            <p class="text-xs text-slate-400">Compras pendientes</p>
-            <p class="text-2xl font-semibold" x-text="shoppingPending.length"></p>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-3xl p-4 border border-slate-100">
-          <div class="flex items-center justify-between mb-2">
-            <h3 class="font-medium">Rutinas de hoy</h3>
-            <span class="text-xs text-iosBlue" x-text="todaysRoutineActions().length"></span>
-          </div>
-          <template x-for="action in todaysRoutineActions()" :key="action.key">
-            <p class="text-sm py-1">• <span class="font-medium" x-text="action.time"></span> — <span x-text="action.text"></span></p>
+        <!-- Requiere decisión -->
+        <div x-show="plan && plan.conflicts && plan.conflicts.length > 0" class="bg-white rounded-3xl border border-amber-200 shadow-sm p-4">
+          <h3 class="font-semibold mb-2 flex items-center gap-2">
+            <span>⚠️</span><span>Requiere decisión</span>
+            <span class="ml-auto text-xs text-slate-400" x-text="plan?.conflicts?.length"></span>
+          </h3>
+          <template x-for="c in (plan?.conflicts || [])" :key="c.id">
+            <div class="py-3 border-t first:border-t-0 border-slate-100">
+              <p class="text-sm font-medium" x-text="conflictTitle(c)"></p>
+              <p class="text-xs text-slate-500 mt-0.5" x-text="c.explanation"></p>
+              <ul x-show="(c.suggested_resolutions || []).length > 0" class="mt-1.5 text-xs text-slate-600 space-y-0.5">
+                <template x-for="(r, i) in (c.suggested_resolutions || [])" :key="c.id + '-' + i">
+                  <li>• <span x-text="r"></span></li>
+                </template>
+              </ul>
+            </div>
           </template>
-          <p x-show="todaysRoutineActions().length===0" class="text-sm text-slate-400">No hay rutinas activas para hoy.</p>
         </div>
 
-        <div class="bg-white rounded-3xl p-4 border border-slate-100">
+        <!-- Traslados combinados -->
+        <div x-show="combinedTrips().length > 0" class="bg-white rounded-3xl border border-slate-100 shadow-sm p-4">
+          <h3 class="font-semibold mb-2 flex items-center gap-2">
+            <span>🔗</span><span>Traslados combinados</span>
+            <span class="ml-auto text-xs text-slate-400" x-text="combinedTrips().length"></span>
+          </h3>
+          <template x-for="t in combinedTrips()" :key="t.id">
+            <div class="py-2 border-t first:border-t-0 border-slate-100">
+              <p class="text-sm font-medium">
+                <span class="font-mono" x-text="formatTime(t.depart_at)"></span>
+                — <span x-text="t.destination"></span>
+              </p>
+              <p class="text-xs text-slate-500">
+                <span x-text="t.driver || 'sin asignar'"></span> lleva a <span x-text="(t.passengers || []).join(' + ') || 'los chicos'"></span>
+              </p>
+            </div>
+          </template>
+        </div>
+
+        <!-- Plan recomendado: timeline cronológico -->
+        <div class="bg-white rounded-3xl border border-slate-100 shadow-sm p-4">
           <div class="flex items-center justify-between mb-2">
-            <h3 class="font-medium">Tareas por miembro</h3>
-            <span class="text-xs text-iosBlue">Hoy</span>
+            <h3 class="font-semibold">Plan recomendado</h3>
+            <span class="text-xs text-slate-400" x-text="(plan?.blocks?.length || 0) + ' bloques'"></span>
+          </div>
+          <template x-for="b in (plan?.blocks || [])" :key="b.id">
+            <div class="py-2 border-t first:border-t-0 border-slate-100">
+              <div class="flex items-start gap-3">
+                <p class="text-sm font-mono text-slate-500 w-12 shrink-0 pt-0.5" x-text="formatTime(b.start)"></p>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium truncate" x-text="b.title"></p>
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500 mt-0.5">
+                    <span x-show="b.responsible" class="font-medium text-slate-700" x-text="b.responsible"></span>
+                    <span x-show="!b.responsible" class="text-amber-600">sin asignar</span>
+                    <span x-show="b.location_name || b.location_alias" x-text="'· ' + (b.location_name || b.location_alias)"></span>
+                    <span x-show="b.merged_from_count > 1" class="text-iosBlue">🔗 combinado</span>
+                    <span x-show="b.needs_review" class="text-amber-600">⚠ revisar</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+          <p x-show="!planLoading && (!plan?.blocks || plan.blocks.length === 0)" class="text-sm text-slate-400 py-2">
+            Día tranquilo. Todo encaja.
+          </p>
+        </div>
+
+        <!-- Próximamente (48 h) -->
+        <div x-show="upcomingPlans.length > 0" class="bg-white rounded-3xl border border-slate-100 shadow-sm p-4">
+          <h3 class="font-semibold mb-2 flex items-center gap-2">
+            <span>📅</span><span>Próximamente</span>
+          </h3>
+          <template x-for="p in upcomingPlans" :key="p.date">
+            <div class="flex items-center justify-between py-1.5 border-t first:border-t-0 border-slate-100 text-sm">
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-slate-500 w-10" x-text="formatShortDay(p.date)"></span>
+                <span x-text="(p.blocks?.length || 0) + ' bloques'"></span>
+                <span class="text-xs text-slate-400" x-text="'· ' + upcomingLabel(p.status)"></span>
+              </div>
+              <span x-text="statusMeta(p.status).emoji"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Atajo: tareas del día, compacto -->
+        <div x-show="family.length > 0" class="bg-white rounded-3xl border border-slate-100 shadow-sm p-4">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-semibold">Tareas por miembro</h3>
+            <span class="text-xs text-slate-400">Hoy</span>
           </div>
           <template x-for="m in family" :key="'task-' + m.id">
-            <div class="mb-2">
+            <div class="mb-2" x-show="memberTasks(m).length > 0">
               <p class="text-sm font-medium" x-text="m.name"></p>
               <template x-for="item in memberTasks(m)" :key="m.id + '-' + (item.id || item.title) + '-' + (item.start || item.due_date)">
                 <div class="flex items-center justify-between gap-2 text-sm text-slate-600">
@@ -142,24 +218,9 @@
                   <button x-show="item.id && !item.auto_generated" @click="markTaskDone(item.id)" class="text-xs text-iosBlue">Hecha</button>
                 </div>
               </template>
-              <p x-show="memberTasks(m).length===0" class="text-xs text-slate-400">Sin tareas asignadas.</p>
             </div>
           </template>
-          <p x-show="family.length===0" class="text-sm text-slate-400">Cargá miembros para ver tareas asignadas.</p>
-          <div class="mt-4 pt-3 border-t border-slate-100 space-y-2">
-            <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Agregar tarea manual</p>
-            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
-              <input x-model="newTask.title" placeholder="Nueva tarea (ej: comprar regalo)" class="sm:col-span-6 rounded-xl border border-slate-200 px-3 py-2 text-sm w-full">
-              <select x-model="newTask.assignee" class="sm:col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm w-full">
-                <option value="">Sin asignar</option>
-                <template x-for="m in family" :key="'task-opt-' + m.id">
-                  <option :value="m.nickname" x-text="m.name"></option>
-                </template>
-              </select>
-              <input x-model="newTask.due_date" type="date" class="sm:col-span-3 rounded-xl border border-slate-200 px-2 py-2 text-sm w-full">
-            </div>
-            <button @click="addTask" class="w-full bg-iosBlue text-white rounded-2xl py-2 text-sm">Agregar tarea</button>
-          </div>
+          <p x-show="family.every(m => memberTasks(m).length === 0)" class="text-sm text-slate-400">Sin tareas asignadas.</p>
         </div>
       </section>
 
@@ -592,6 +653,10 @@
         authError: '',
         loggingIn: false,
         events: [],
+        plan: null,
+        planLoading: false,
+        planError: '',
+        upcomingPlans: [],
         shoppingPending: [],
         get shoppingCategories() {
           const grouped = {}
@@ -707,11 +772,92 @@
           this.places = Array.isArray(places) ? places : []
           this.routines = Array.isArray(routines) ? routines : []
           this.tasks = Array.isArray(tasks) ? tasks : []
+          // Plan del día + próximos 2 días (no bloqueante)
+          this.loadPlan()
+          this.loadUpcoming()
 
           // Show nickname selector only when we have members to choose from
           if (this.user && !this.userNickname && this.family.length > 0) {
             this.showNicknameSelector = true
           }
+        },
+
+        // ── Centro de operaciones (plan diario) ────────────────────────────
+        todayISO() {
+          // YYYY-MM-DD en la zona horaria argentina
+          return new Date().toLocaleDateString('sv-SE', { timeZone: AR_TZ })
+        },
+
+        offsetDateISO(offsetDays) {
+          const d = new Date()
+          d.setDate(d.getDate() + offsetDays)
+          return d.toLocaleDateString('sv-SE', { timeZone: AR_TZ })
+        },
+
+        async loadPlan() {
+          if (this.planLoading || !this.token) return
+          this.planLoading = true
+          this.planError = ''
+          const result = await this.api(`/plan/${this.todayISO()}`)
+          if (result && !result.__error) {
+            this.plan = result
+          } else if (result?.__error) {
+            this.planError = result.__error
+          }
+          this.planLoading = false
+        },
+
+        async loadUpcoming() {
+          if (!this.token) return
+          const dates = [1, 2].map(o => this.offsetDateISO(o))
+          const results = await Promise.all(dates.map(d => this.api(`/plan/${d}`)))
+          this.upcomingPlans = results.filter(p => p && !p.__error)
+        },
+
+        statusMeta(status) {
+          const s = status ?? this.plan?.status
+          if (s === 'calma') return { emoji: '🟢', label: 'Calma', cls: 'bg-emerald-50 border-emerald-200 text-emerald-900' }
+          if (s === 'ocupado') return { emoji: '🟡', label: 'Ocupado', cls: 'bg-amber-50 border-amber-200 text-amber-900' }
+          if (s === 'revisar') return { emoji: '🔴', label: 'Revisar', cls: 'bg-rose-50 border-rose-200 text-rose-900' }
+          return { emoji: '⚪', label: 'Sin datos', cls: 'bg-white border-slate-200 text-slate-700' }
+        },
+
+        combinedTrips() {
+          return (this.plan?.trips || []).filter(t => t.combined)
+        },
+
+        conflictTitle(c) {
+          const labels = {
+            temporal_person: 'Choque de horario',
+            spatial: 'Dos lugares al mismo tiempo',
+            travel_infeasible: 'No alcanza el tiempo de traslado',
+            driver: 'Responsable no autorizado',
+            orphan_minor: 'Menor sin adulto asignado',
+          }
+          return labels[c.kind] || 'Conflicto'
+        },
+
+        blockKindLabel(k) {
+          return { pickup: 'Retiro', drop: 'Llevar', stay: 'Permanencia', errand: 'Mandado' }[k] || ''
+        },
+
+        formatTime(iso) {
+          if (!iso) return ''
+          try {
+            return new Date(iso).toLocaleTimeString('es-AR', {
+              hour: '2-digit', minute: '2-digit', timeZone: AR_TZ,
+            })
+          } catch (_) { return '' }
+        },
+
+        formatShortDay(dateStr) {
+          const d = new Date(dateStr + 'T12:00:00')
+          const name = d.toLocaleDateString('es-AR', { weekday: 'short', timeZone: AR_TZ })
+          return name.charAt(0).toUpperCase() + name.slice(1, 3)
+        },
+
+        upcomingLabel(status) {
+          return { calma: 'tranquilo', ocupado: 'ocupado', revisar: 'revisar' }[status] || ''
         },
 
         selectUserNickname(nickname) {
