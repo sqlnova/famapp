@@ -2,14 +2,37 @@
 
 Pipeline diario:
 
-    events → normalize → merge → (conflict → assign → score)
-
-Este paquete expone primero `normalize` y `merge`. Las etapas de detección
-de conflictos, asignación y scoring se agregan en fases posteriores.
+    events → normalize → merge → conflicts → assign → feasibility
 """
 from __future__ import annotations
 
+from core.planner.assign import AssignmentContext, assign_responsibles
+from core.planner.conflicts import (
+    AvailabilityIndex,
+    detect_conflicts,
+    detect_driver_unauthorized,
+    detect_orphan_minor,
+    detect_spatial,
+    detect_temporal_person,
+    detect_travel_infeasible,
+)
+from core.planner.feasibility import FeasibilityBreakdown, feasibility
 from core.planner.merge import merge_compatible
 from core.planner.normalize import normalize_event, normalize_events
 
-__all__ = ["normalize_event", "normalize_events", "merge_compatible"]
+__all__ = [
+    "normalize_event",
+    "normalize_events",
+    "merge_compatible",
+    "AvailabilityIndex",
+    "detect_conflicts",
+    "detect_temporal_person",
+    "detect_spatial",
+    "detect_travel_infeasible",
+    "detect_driver_unauthorized",
+    "detect_orphan_minor",
+    "AssignmentContext",
+    "assign_responsibles",
+    "feasibility",
+    "FeasibilityBreakdown",
+]
