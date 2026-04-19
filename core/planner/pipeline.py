@@ -17,9 +17,11 @@ from core.models import (
     CalendarEvent,
     DailyPlan,
     FamilyMember,
+    FamilyRoutine,
     KnownPlace,
     LogisticsBlock,
     PreferenceProfile,
+    RoutineException,
     SupportNetworkMember,
     Trip,
 )
@@ -33,6 +35,7 @@ from core.planner.conflicts import (
 from core.planner.feasibility import feasibility
 from core.planner.merge import merge_compatible
 from core.planner.normalize import normalize_events
+from core.planner.routines import expand_routines_for_day
 
 
 @dataclass
@@ -43,6 +46,8 @@ class FamilyContext:
     known_places: List[KnownPlace] = field(default_factory=list)
     availability: AvailabilityIndex = field(default_factory=AvailabilityIndex)
     preferences: List[PreferenceProfile] = field(default_factory=list)
+    routines: List[FamilyRoutine] = field(default_factory=list)
+    routine_exceptions: List[RoutineException] = field(default_factory=list)
     travel_time_fn: TravelTimeFn = _default_travel_time
 
     @property
@@ -111,9 +116,21 @@ def plan_day(
     """
     ctx = ctx or FamilyContext()
 
+    # 0. Expandir rutinas semanales → eventos virtuales del día.
+    # Los IDs sintéticos (`routine:...`) evitan colisión con eventos reales.
+    # Si un evento real ya cubre el mismo horario/hijos/lugar, la etapa de
+    # merge los fusionará más adelante.
+    routine_events = expand_routines_for_day(
+        ctx.routines,
+        date,
+        known_places=ctx.known_places,
+        exceptions=ctx.routine_exceptions,
+    )
+    all_events = list(events) + routine_events
+
     # 1. Normalizar eventos → bloques canónicos
     blocks = normalize_events(
-        events,
+        all_events,
         known_places=ctx.known_places,
         known_children=ctx.known_children,
     )
