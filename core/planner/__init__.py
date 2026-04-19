@@ -19,6 +19,7 @@ from core.planner.conflicts import (
 from core.planner.feasibility import FeasibilityBreakdown, feasibility
 from core.planner.merge import merge_compatible
 from core.planner.normalize import normalize_event, normalize_events
+from core.planner.pipeline import FamilyContext, plan_day
 
 __all__ = [
     "normalize_event",
@@ -35,4 +36,6 @@ __all__ = [
     "assign_responsibles",
     "feasibility",
     "FeasibilityBreakdown",
+    "FamilyContext",
+    "plan_day",
 ]
