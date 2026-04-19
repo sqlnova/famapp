@@ -114,7 +114,7 @@
             </div>
             <button @click="loadPlan()" class="text-xs opacity-60 hover:opacity-100" title="Actualizar">↻</button>
           </div>
-          <p class="text-sm opacity-80 mt-1" x-text="plan?.summary_es || (planLoading ? 'Calculando el plan…' : 'Aún sin datos del día.')"></p>
+          <p class="text-sm opacity-80 mt-1" x-text="pulseSummary()"></p>
           <p x-show="plan && plan.feasibility_score != null" class="text-xs opacity-60 mt-2">
             Factibilidad: <span x-text="Math.round((plan?.feasibility_score ?? 0) * 100) + '%'"></span>
           </p>
@@ -224,17 +224,19 @@
             <span class="text-xs text-slate-400">Hoy</span>
           </div>
           <template x-for="m in family" :key="'task-' + m.id">
-            <div class="mb-2" x-show="memberTasks(m).length > 0">
-              <p class="text-sm font-medium" x-text="m.name"></p>
+            <div class="mb-2 last:mb-0">
+              <div class="flex items-baseline justify-between gap-2">
+                <p class="text-sm font-medium" x-text="m.name"></p>
+                <span x-show="memberTasks(m).length === 0" class="text-xs text-slate-400">sin tareas</span>
+              </div>
               <template x-for="item in memberTasks(m)" :key="m.id + '-' + (item.id || item.title) + '-' + (item.start || item.due_date)">
                 <div class="flex items-center justify-between gap-2 text-sm text-slate-600">
-                  <p>• <span x-text="item.title"></span></p>
-                  <button x-show="item.id && !item.auto_generated" @click="markTaskDone(item.id)" class="text-xs text-iosBlue">Hecha</button>
+                  <p class="truncate">• <span x-text="item.title"></span></p>
+                  <button x-show="item.id && !item.auto_generated" @click="markTaskDone(item.id)" class="text-xs text-iosBlue shrink-0">Hecha</button>
                 </div>
               </template>
             </div>
           </template>
-          <p x-show="family.every(m => memberTasks(m).length === 0)" class="text-sm text-slate-400">Sin tareas asignadas.</p>
         </div>
       </section>
 
@@ -876,11 +878,21 @@
         },
 
         statusMeta(status) {
+          const explicit = status !== undefined
           const s = status ?? this.plan?.status
           if (s === 'calma') return { emoji: '🟢', label: 'Calma', cls: 'bg-emerald-50 border-emerald-200 text-emerald-900' }
           if (s === 'ocupado') return { emoji: '🟡', label: 'Ocupado', cls: 'bg-amber-50 border-amber-200 text-amber-900' }
           if (s === 'revisar') return { emoji: '🔴', label: 'Revisar', cls: 'bg-rose-50 border-rose-200 text-rose-900' }
+          if (!explicit && this.planLoading) return { emoji: '🔄', label: 'Calculando', cls: 'bg-slate-50 border-slate-200 text-slate-500' }
           return { emoji: '⚪', label: 'Sin datos', cls: 'bg-white border-slate-200 text-slate-700' }
+        },
+
+        pulseSummary() {
+          if (this.planLoading && !this.plan) return 'Calculando el plan…'
+          if (!this.plan) return 'Aún sin datos del día.'
+          const blocks = this.plan.blocks?.length || 0
+          if (blocks === 0 && this.plan.status === 'calma') return 'Día tranquilo, sin compromisos.'
+          return this.plan.summary_es || `${blocks} bloques`
         },
 
         combinedTrips() {
@@ -1376,21 +1388,21 @@
         memberTasks(member) {
           const nick = (member.nickname || '').toLowerCase()
           const name = (member.name || '').toLowerCase()
+          const todayKey = this.toDateKey(new Date())
+          const matchAssignee = (val) => {
+            const a = (val || '').toLowerCase()
+            return a === nick || a === name
+          }
           const eventTasks = this.todayEvents().filter((e) => {
-            const responsible = (e.responsible_nickname || '').toLowerCase()
-            return responsible === nick || responsible === name
+            return matchAssignee(e.responsible_nickname)
           }).map((e) => ({ title: e.title, start: e.start, auto_generated: true }))
           const manualTasks = this.tasks
             .filter((t) => t.status !== 'done')
-            .filter((t) => {
-              const assignee = (t.assignee || '').toLowerCase()
-              return assignee === nick || assignee === name
-            })
+            .filter((t) => matchAssignee(t.assignee))
+            .filter((t) => !t.due_date || t.due_date <= todayKey)   // hoy o vencidas
           const generated = this.generatedTasksFromEvents()
-            .filter((t) => {
-              const assignee = (t.assignee || '').toLowerCase()
-              return assignee === nick || assignee === name
-            })
+            .filter((t) => matchAssignee(t.assignee))
+            .filter((t) => t.due_date === todayKey)                 // sólo hoy
           return [...manualTasks, ...eventTasks, ...generated]
         },
 
