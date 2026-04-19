@@ -1,9 +1,9 @@
 """Shared Pydantic domain models."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -188,3 +188,189 @@ class MessageRecord(BaseModel):
     response: Optional[str] = None
     status: MessageStatus = MessageStatus.RECEIVED
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── Logistics Domain ──────────────────────────────────────────────────────────
+# Core primitives for the family logistics copilot. A CalendarEvent is raw
+# input; a LogisticsBlock is the operational unit the planner works with.
+
+class LogisticsBlockKind(str, Enum):
+    PICKUP = "pickup"     # retirar / buscar / pasar a buscar
+    DROP = "drop"         # llevar / dejar
+    STAY = "stay"         # permanecer en el lugar (clase, partido)
+    ERRAND = "errand"     # mandado / trámite
+    UNKNOWN = "unknown"
+
+
+class ConflictKind(str, Enum):
+    TEMPORAL_PERSON = "temporal_person"     # misma persona en dos bloques solapados
+    SPATIAL = "spatial"                     # no hay nadie que pueda cubrir ambos
+    TRAVEL_INFEASIBLE = "travel_infeasible"  # no alcanza el tiempo para viajar
+    DRIVER = "driver"                       # asignado no puede conducir / no apto
+    ORPHAN_MINOR = "orphan_minor"            # menor queda sin adulto responsable
+
+
+class ConflictSeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    BLOCKER = "blocker"
+
+
+class PlanStatus(str, Enum):
+    CALMA = "calma"
+    OCUPADO = "ocupado"
+    REVISAR = "revisar"
+
+
+class SupportRole(str, Enum):
+    CORE = "core"           # adulto del núcleo (papá / mamá)
+    GRANDPARENT = "grandparent"
+    NANNY = "nanny"
+    NEIGHBOR = "neighbor"
+    CARPOOL = "carpool"
+    OTHER = "other"
+
+
+class SupportNetworkMember(BaseModel):
+    """Tercero de confianza que puede cubrir logística puntualmente.
+
+    Complementa a FamilyMember (núcleo) con red extendida: abuelos, nannies,
+    vecinos, carpools. Tiene nivel de confianza y tipos de tarea permitidos.
+    """
+    id: Optional[UUID] = None
+    name: str
+    nickname: str
+    role: SupportRole = SupportRole.OTHER
+    can_drive: bool = True
+    allowed_kinds: List[LogisticsBlockKind] = Field(default_factory=list)
+    allowed_children: List[str] = Field(default_factory=list)  # nicknames
+    trust_level: float = Field(0.5, ge=0.0, le=1.0)
+    contactable_via: Optional[str] = None   # whatsapp / phone / none
+    notes: Optional[str] = None
+
+
+class AvailabilityWindow(BaseModel):
+    """Ventana en la que un responsable puede cubrir logística."""
+    id: Optional[UUID] = None
+    member_nickname: str
+    weekday: int = Field(ge=0, le=6)   # 0 = lunes
+    start: time
+    end: time
+    hard: bool = True   # hard = no-negociable; soft = preferencia
+
+
+class RoutineException(BaseModel):
+    """Excepción puntual a una FamilyRoutine (p.ej. esta semana no hay club)."""
+    id: Optional[UUID] = None
+    routine_id: UUID
+    date: str                           # YYYY-MM-DD
+    skip: bool = True
+    override_responsible: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class LogisticsBlock(BaseModel):
+    """Unidad operativa del planificador.
+
+    Un bloque representa una acción logística concreta (llevar, retirar,
+    permanecer) con lugar, ventana de tiempo y miembros involucrados. Puede
+    provenir de 1..N eventos de calendario (resultado de una fusión).
+    """
+    id: UUID = Field(default_factory=uuid4)
+    kind: LogisticsBlockKind = LogisticsBlockKind.UNKNOWN
+    title: str
+    start: datetime
+    end: datetime
+    location_alias: Optional[str] = None     # key en KnownPlace
+    location_name: Optional[str] = None
+    members: List[str] = Field(default_factory=list)   # chicos involucrados
+    responsible: Optional[str] = None                  # nickname adulto
+    source_event_ids: List[str] = Field(default_factory=list)
+    merged_from: List[UUID] = Field(default_factory=list)  # bloques fusionados
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
+    needs_review: bool = False
+    notes: Optional[str] = None
+
+    @property
+    def duration_minutes(self) -> int:
+        return max(0, int((self.end - self.start).total_seconds() // 60))
+
+
+class Trip(BaseModel):
+    """Traslado físico que materializa uno o varios LogisticsBlock."""
+    id: UUID = Field(default_factory=uuid4)
+    origin: Optional[str] = None           # alias o dirección
+    destination: str
+    depart_at: datetime
+    arrive_at: datetime
+    driver_nickname: Optional[str] = None
+    passenger_members: List[str] = Field(default_factory=list)
+    block_ids: List[UUID] = Field(default_factory=list)
+    estimated_travel_minutes: Optional[int] = None
+    combined: bool = False                 # True si agrupa ≥2 bloques
+
+
+class Conflict(BaseModel):
+    """Problema detectado por el motor."""
+    id: UUID = Field(default_factory=uuid4)
+    kind: ConflictKind
+    severity: ConflictSeverity = ConflictSeverity.WARNING
+    block_ids: List[UUID] = Field(default_factory=list)
+    involved_members: List[str] = Field(default_factory=list)
+    reason_code: str = ""
+    explanation: str = ""
+    suggested_resolutions: List[str] = Field(default_factory=list)
+
+
+class Assignment(BaseModel):
+    """Resultado de asignar un responsable a un bloque."""
+    block_id: UUID
+    responsible_nickname: str
+    confidence: float = Field(0.5, ge=0.0, le=1.0)
+    reason_code: str = ""
+    explanation: str = ""
+    alternatives: List[Tuple[str, float]] = Field(default_factory=list)
+
+
+class DailyPlan(BaseModel):
+    """Salida principal del motor de planificación."""
+    id: UUID = Field(default_factory=uuid4)
+    date: str                              # YYYY-MM-DD
+    status: PlanStatus = PlanStatus.CALMA
+    feasibility_score: float = Field(1.0, ge=0.0, le=1.0)
+    blocks: List[LogisticsBlock] = Field(default_factory=list)
+    trips: List[Trip] = Field(default_factory=list)
+    conflicts: List[Conflict] = Field(default_factory=list)
+    assignments: List[Assignment] = Field(default_factory=list)
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    summary_es: Optional[str] = None
+
+
+class PlanFeedbackAction(str, Enum):
+    ACCEPT = "accept"
+    OVERRIDE = "override"
+    EDIT = "edit"
+    IGNORE = "ignore"
+
+
+class PlanFeedback(BaseModel):
+    """Señal de aprendizaje: qué hizo el usuario con el plan."""
+    id: Optional[UUID] = None
+    plan_id: UUID
+    block_id: Optional[UUID] = None
+    user_nickname: str
+    action: PlanFeedbackAction
+    delta: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PreferenceProfile(BaseModel):
+    """Afinidad histórica aprendida (responsable × lugar × tipo de bloque)."""
+    id: Optional[UUID] = None
+    member_nickname: str
+    place_alias: Optional[str] = None
+    block_kind: Optional[LogisticsBlockKind] = None
+    weekday: Optional[int] = None
+    score: float = Field(0.5, ge=0.0, le=1.0)
+    sample_size: int = 0
+    last_updated: datetime = Field(default_factory=datetime.utcnow)
