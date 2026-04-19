@@ -1216,3 +1216,114 @@ async def api_delete_memory(note_id: str, user=Depends(require_auth)):
     if not result.data:
         raise HTTPException(status_code=404, detail="Nota no encontrada")
     return {"ok": True}
+
+
+# ── Plan diario — Centro de Operaciones Familiar ──────────────────────────────
+
+def _serialize_plan(plan: "DailyPlan") -> Dict[str, Any]:
+    """Serializar DailyPlan a JSON amigable para el dashboard."""
+    return {
+        "date": plan.date,
+        "status": plan.status.value,
+        "feasibility_score": plan.feasibility_score,
+        "summary_es": plan.summary_es,
+        "blocks": [
+            {
+                "id": str(b.id),
+                "kind": b.kind.value,
+                "title": b.title,
+                "start": b.start.astimezone(AR_TZ).isoformat(),
+                "end": b.end.astimezone(AR_TZ).isoformat(),
+                "location_alias": b.location_alias,
+                "location_name": b.location_name,
+                "members": b.members,
+                "responsible": b.responsible,
+                "confidence": b.confidence,
+                "needs_review": b.needs_review,
+                "merged_from_count": len(b.merged_from),
+                "notes": b.notes,
+            }
+            for b in plan.blocks
+        ],
+        "trips": [
+            {
+                "id": str(t.id),
+                "origin": t.origin,
+                "destination": t.destination,
+                "depart_at": t.depart_at.astimezone(AR_TZ).isoformat(),
+                "arrive_at": t.arrive_at.astimezone(AR_TZ).isoformat(),
+                "driver": t.driver_nickname,
+                "passengers": t.passenger_members,
+                "combined": t.combined,
+            }
+            for t in plan.trips
+        ],
+        "conflicts": [
+            {
+                "id": str(c.id),
+                "kind": c.kind.value,
+                "severity": c.severity.value,
+                "block_ids": [str(bid) for bid in c.block_ids],
+                "involved_members": c.involved_members,
+                "explanation": c.explanation,
+                "suggested_resolutions": c.suggested_resolutions,
+            }
+            for c in plan.conflicts
+        ],
+        "assignments": [
+            {
+                "block_id": str(a.block_id),
+                "responsible": a.responsible_nickname,
+                "confidence": a.confidence,
+                "explanation": a.explanation,
+                "alternatives": [
+                    {"nickname": nick, "score": score} for nick, score in a.alternatives
+                ],
+            }
+            for a in plan.assignments
+        ],
+    }
+
+
+@router.get("/api/plan/{date}")
+async def api_daily_plan(date: str, user=Depends(require_auth)):
+    """Centro de operaciones: plan logístico del día.
+
+    `date` en formato YYYY-MM-DD. Ejecuta el pipeline completo
+    (normalize → merge → assign → conflicts → feasibility) sobre los
+    eventos del día y retorna un DailyPlan serializado.
+    """
+    from core.planner.pipeline import FamilyContext, plan_day
+
+    try:
+        target_date = datetime.fromisoformat(date).date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Fecha inválida, usar YYYY-MM-DD") from exc
+
+    # Ventana del día en AR_TZ
+    day_start = datetime.combine(target_date, datetime.min.time(), tzinfo=AR_TZ)
+    day_end = day_start + timedelta(days=1)
+
+    loop = asyncio.get_event_loop()
+    # Fetch de datos en paralelo (los tres son I/O)
+    all_events, family_members, places = await asyncio.gather(
+        loop.run_in_executor(None, lambda: list_upcoming_events(days=7, max_results=300)),
+        loop.run_in_executor(None, get_family_members),
+        loop.run_in_executor(None, get_all_known_places),
+    )
+
+    # Filtrar eventos que caen en el día target (start dentro de la ventana)
+    day_events = [
+        e for e in all_events
+        if day_start <= e.start.astimezone(AR_TZ) < day_end
+    ]
+
+    ctx = FamilyContext(
+        family=family_members,
+        support=[],  # TODO: fetch de supabase cuando se modele la tabla
+        known_places=places,
+        preferences=[],  # TODO: fetch cuando se instrumente aprendizaje
+    )
+
+    plan = plan_day(date=date, events=day_events, ctx=ctx)
+    return _serialize_plan(plan)
