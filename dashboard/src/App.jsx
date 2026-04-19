@@ -5,7 +5,8 @@ import EventFeed from "./components/EventFeed.jsx";
 import AgentCard from "./components/AgentCard.jsx";
 
 const WS_URL =
-  import.meta.env.VITE_MONITORING_WS_URL || "ws://localhost:8001/ws";
+  import.meta.env.VITE_MONITORING_WS_URL ||
+  "wss://web-production-44587.up.railway.app/ws";
 
 const AGENTS = [
   { key: "intake", label: "Intake", description: "Routing & classification" },
