@@ -20,6 +20,7 @@ from core.planner.feasibility import FeasibilityBreakdown, feasibility
 from core.planner.merge import merge_compatible
 from core.planner.normalize import normalize_event, normalize_events
 from core.planner.pipeline import FamilyContext, plan_day
+from core.planner.routines import expand_routines_for_day
 
 __all__ = [
     "normalize_event",
@@ -38,4 +39,5 @@ __all__ = [
     "FeasibilityBreakdown",
     "FamilyContext",
     "plan_day",
+    "expand_routines_for_day",
 ]

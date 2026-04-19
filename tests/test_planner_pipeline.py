@@ -7,11 +7,14 @@ from __future__ import annotations
 
 from datetime import datetime, time
 
+from uuid import uuid4
+
 from core.models import (
     AvailabilityWindow,
     CalendarEvent,
     ConflictKind,
     FamilyMember,
+    FamilyRoutine,
     KnownPlace,
     LogisticsBlockKind,
     PlanStatus,
@@ -303,6 +306,33 @@ def test_pipeline_handles_missing_data_gracefully():
     assert len(plan.blocks) == 1
     assert plan.blocks[0].needs_review is True
     assert plan.blocks[0].confidence < 1.0
+
+
+def test_pipeline_expands_routines_into_plan():
+    """Si el FamilyContext trae rutinas, se materializan como bloques del día."""
+    routine = FamilyRoutine(
+        id=uuid4(),
+        title="Colegio",
+        days=["MO"],  # sólo lunes
+        children=["Giuseppe"],
+        outbound_time="07:45",
+        return_time="13:00",
+        outbound_responsible="papa",
+        return_responsible="mama",
+        place_alias="colegio",
+        place_name="Colegio San Juan",
+    )
+    ctx = FamilyContext(
+        family=_family(),
+        known_places=_places(),
+        routines=[routine],
+    )
+    # 2026-04-20 es lunes → dos bloques virtuales.
+    plan_lun = plan_day("2026-04-20", events=[], ctx=ctx)
+    assert len(plan_lun.blocks) == 2
+    # 2026-04-19 es domingo → ningún bloque.
+    plan_dom = plan_day("2026-04-19", events=[], ctx=ctx)
+    assert plan_dom.blocks == []
 
 
 def test_pipeline_respects_preassigned_responsible():

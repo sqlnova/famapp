@@ -1305,11 +1305,12 @@ async def api_daily_plan(date: str, user=Depends(require_auth)):
     day_end = day_start + timedelta(days=1)
 
     loop = asyncio.get_event_loop()
-    # Fetch de datos en paralelo (los tres son I/O)
-    all_events, family_members, places = await asyncio.gather(
+    # Fetch de datos en paralelo (los 4 son I/O)
+    all_events, family_members, places, routines = await asyncio.gather(
         loop.run_in_executor(None, lambda: list_upcoming_events(days=7, max_results=300)),
         loop.run_in_executor(None, get_family_members),
         loop.run_in_executor(None, get_all_known_places),
+        loop.run_in_executor(None, list_family_routines),
     )
 
     # Filtrar eventos que caen en el día target (start dentro de la ventana)
@@ -1322,6 +1323,8 @@ async def api_daily_plan(date: str, user=Depends(require_auth)):
         family=family_members,
         support=[],  # TODO: fetch de supabase cuando se modele la tabla
         known_places=places,
+        routines=routines,
+        routine_exceptions=[],  # TODO: fetch cuando se instrumente la tabla
         preferences=[],  # TODO: fetch cuando se instrumente aprendizaje
     )
 
