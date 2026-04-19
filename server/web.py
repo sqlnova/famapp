@@ -28,6 +28,7 @@ from server.local_store import (
 )
 from core.supabase_client import (
     add_shopping_item,
+    deactivate_support_member,
     delete_known_place,
     get_all_known_places,
     get_completed_shopping_items,
@@ -36,10 +37,16 @@ from core.supabase_client import (
     get_supabase,
     get_known_places_dict,
     list_family_routines,
+    list_preference_profiles,
+    list_recent_plan_feedback,
+    list_support_members,
+    record_plan_feedback,
     resolve_place_address,
     mark_shopping_item_done,
     upsert_family_routine,
     upsert_known_place,
+    upsert_preference_profile,
+    upsert_support_member,
 )
 
 logger = structlog.get_logger(__name__)
@@ -1305,12 +1312,27 @@ async def api_daily_plan(date: str, user=Depends(require_auth)):
     day_end = day_start + timedelta(days=1)
 
     loop = asyncio.get_event_loop()
-    # Fetch de datos en paralelo (los 4 son I/O)
-    all_events, family_members, places, routines = await asyncio.gather(
+
+    def _safe_list_support():
+        try:
+            return list_support_members(only_active=True)
+        except Exception:
+            return []
+
+    def _safe_list_preferences():
+        try:
+            return list_preference_profiles()
+        except Exception:
+            return []
+
+    # Fetch de datos en paralelo (todo I/O)
+    all_events, family_members, places, routines, support, preferences = await asyncio.gather(
         loop.run_in_executor(None, lambda: list_upcoming_events(days=7, max_results=300)),
         loop.run_in_executor(None, get_family_members),
         loop.run_in_executor(None, get_all_known_places),
         loop.run_in_executor(None, list_family_routines),
+        loop.run_in_executor(None, _safe_list_support),
+        loop.run_in_executor(None, _safe_list_preferences),
     )
 
     # Filtrar eventos que caen en el día target (start dentro de la ventana)
@@ -1321,12 +1343,144 @@ async def api_daily_plan(date: str, user=Depends(require_auth)):
 
     ctx = FamilyContext(
         family=family_members,
-        support=[],  # TODO: fetch de supabase cuando se modele la tabla
+        support=support,
         known_places=places,
         routines=routines,
         routine_exceptions=[],  # TODO: fetch cuando se instrumente la tabla
-        preferences=[],  # TODO: fetch cuando se instrumente aprendizaje
+        preferences=preferences,
     )
 
     plan = plan_day(date=date, events=day_events, ctx=ctx)
     return _serialize_plan(plan)
+
+
+# ── Feedback del plan (learning layer) ────────────────────────────────────────
+
+@router.post("/api/plan/{date}/feedback")
+async def api_plan_feedback(
+    date: str,
+    payload: Dict[str, Any] = Body(...),
+    user=Depends(require_auth),
+    x_user_nickname: Optional[str] = Header(None),
+):
+    """Registrar una acción del usuario sobre un bloque del plan.
+
+    Body esperado:
+        block_id (opcional), action ("accept"|"override"|"edit"|"ignore"),
+        old_responsible, new_responsible, place_alias, block_kind, delta.
+    """
+    action = (payload.get("action") or "").strip().lower()
+    if action not in {"accept", "override", "edit", "ignore"}:
+        raise HTTPException(status_code=400, detail="action inválida")
+
+    try:
+        datetime.fromisoformat(date).date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Fecha inválida YYYY-MM-DD") from exc
+
+    loop = asyncio.get_event_loop()
+    try:
+        row = await loop.run_in_executor(
+            None,
+            lambda: record_plan_feedback(
+                plan_date=date,
+                block_id=payload.get("block_id"),
+                user_nickname=x_user_nickname or payload.get("user_nickname") or "unknown",
+                action=action,
+                old_responsible=payload.get("old_responsible"),
+                new_responsible=payload.get("new_responsible"),
+                place_alias=payload.get("place_alias"),
+                block_kind=payload.get("block_kind"),
+                weekday=payload.get("weekday"),
+                delta=payload.get("delta") or {},
+            ),
+        )
+    except Exception as exc:
+        logger.exception("plan_feedback_failed")
+        raise HTTPException(status_code=500, detail="No se pudo guardar feedback") from exc
+    return {"status": "ok", "id": row.get("id")}
+
+
+@router.post("/api/plan/aggregate-preferences")
+async def api_aggregate_preferences(
+    days: int = 90,
+    min_sample_size: int = 3,
+    user=Depends(require_auth),
+):
+    """Re-calcular `preference_profiles` a partir de `plan_feedback`.
+
+    Idempotente. Pensado para correr bajo demanda desde un admin o vía cron.
+    """
+    from core.models import LogisticsBlockKind
+    from core.planner.learn import aggregate_preferences
+
+    loop = asyncio.get_event_loop()
+    rows = await loop.run_in_executor(None, lambda: list_recent_plan_feedback(days=days))
+    profiles = aggregate_preferences(rows, min_sample_size=min_sample_size)
+
+    def _kind_value(p):
+        if p.block_kind is None:
+            return None
+        if isinstance(p.block_kind, LogisticsBlockKind):
+            return p.block_kind.value
+        return str(p.block_kind)
+
+    def _persist():
+        for p in profiles:
+            upsert_preference_profile(
+                member_nickname=p.member_nickname,
+                place_alias=p.place_alias,
+                block_kind=_kind_value(p),
+                weekday=p.weekday,
+                score=p.score,
+                sample_size=p.sample_size,
+            )
+
+    await loop.run_in_executor(None, _persist)
+    return {"status": "ok", "profiles_updated": len(profiles), "feedback_rows": len(rows)}
+
+
+# ── Red de apoyo (support network) ────────────────────────────────────────────
+
+@router.get("/api/support")
+async def api_list_support(user=Depends(require_auth)):
+    loop = asyncio.get_event_loop()
+    members = await loop.run_in_executor(None, lambda: list_support_members(only_active=True))
+    return [m.model_dump(mode="json") for m in members]
+
+
+@router.post("/api/support")
+async def api_upsert_support(
+    payload: Dict[str, Any] = Body(...),
+    user=Depends(require_auth),
+):
+    nickname = (payload.get("nickname") or "").strip().lower()
+    name = (payload.get("name") or "").strip()
+    if not nickname or not name:
+        raise HTTPException(status_code=400, detail="name y nickname son requeridos")
+
+    clean = {
+        "name": name,
+        "nickname": nickname,
+        "role": (payload.get("role") or "other").strip().lower(),
+        "can_drive": bool(payload.get("can_drive", True)),
+        "allowed_kinds": payload.get("allowed_kinds") or [],
+        "allowed_children": payload.get("allowed_children") or [],
+        "trust_level": float(payload.get("trust_level", 0.5)),
+        "contactable_via": payload.get("contactable_via"),
+        "notes": payload.get("notes"),
+        "is_active": bool(payload.get("is_active", True)),
+    }
+    if payload.get("id"):
+        clean["id"] = payload["id"]
+
+    loop = asyncio.get_event_loop()
+    member = await loop.run_in_executor(None, lambda: upsert_support_member(clean))
+    return member.model_dump(mode="json")
+
+
+@router.delete("/api/support/{member_id}")
+async def api_deactivate_support(member_id: str, user=Depends(require_auth)):
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: deactivate_support_member(member_id))
+    return {"status": "ok"}

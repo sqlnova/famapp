@@ -19,7 +19,10 @@ from core.models import (
     KnownPlace,
     MessageRecord,
     MessageStatus,
+    PlanFeedback,
+    PreferenceProfile,
     ShoppingItem,
+    SupportNetworkMember,
 )
 
 logger = structlog.get_logger(__name__)
@@ -323,3 +326,112 @@ def get_family_notes(subject: Optional[str] = None) -> List[FamilyNote]:
         q = q.ilike("subject", f"%{subject.strip()}%")
     result = q.execute()
     return [FamilyNote(**r) for r in result.data]
+
+
+# ── Planner: Support Network ──────────────────────────────────────────────────
+
+def list_support_members(only_active: bool = True) -> List[SupportNetworkMember]:
+    client = get_supabase()
+    q = client.table("support_network_members").select("*").order("created_at", desc=True)
+    if only_active:
+        q = q.eq("is_active", True)
+    result = q.execute()
+    return [SupportNetworkMember(**r) for r in result.data]
+
+
+def upsert_support_member(payload: Dict[str, Any]) -> SupportNetworkMember:
+    client = get_supabase()
+    data = dict(payload)
+    data["updated_at"] = datetime.utcnow().isoformat()
+    result = client.table("support_network_members").upsert(
+        data, on_conflict="nickname"
+    ).execute()
+    return SupportNetworkMember(**result.data[0])
+
+
+def deactivate_support_member(member_id: str) -> None:
+    client = get_supabase()
+    client.table("support_network_members").update({
+        "is_active": False,
+        "updated_at": datetime.utcnow().isoformat(),
+    }).eq("id", member_id).execute()
+
+
+# ── Planner: Preference Profiles ──────────────────────────────────────────────
+
+def list_preference_profiles() -> List[PreferenceProfile]:
+    client = get_supabase()
+    result = client.table("preference_profiles").select("*").execute()
+    return [PreferenceProfile(**r) for r in result.data]
+
+
+def upsert_preference_profile(
+    *,
+    member_nickname: str,
+    place_alias: Optional[str],
+    block_kind: Optional[str],
+    weekday: Optional[int],
+    score: float,
+    sample_size: int,
+) -> PreferenceProfile:
+    client = get_supabase()
+    payload = {
+        "member_nickname": member_nickname,
+        "place_alias": place_alias,
+        "block_kind": block_kind,
+        "weekday": weekday,
+        "score": round(score, 3),
+        "sample_size": sample_size,
+        "last_updated": datetime.utcnow().isoformat(),
+    }
+    result = client.table("preference_profiles").upsert(
+        payload, on_conflict="member_nickname,place_alias,block_kind,weekday"
+    ).execute()
+    return PreferenceProfile(**result.data[0])
+
+
+# ── Planner: Feedback ─────────────────────────────────────────────────────────
+
+def record_plan_feedback(
+    *,
+    plan_date: str,
+    block_id: Optional[str],
+    user_nickname: str,
+    action: str,
+    old_responsible: Optional[str] = None,
+    new_responsible: Optional[str] = None,
+    place_alias: Optional[str] = None,
+    block_kind: Optional[str] = None,
+    weekday: Optional[int] = None,
+    delta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    client = get_supabase()
+    payload = {
+        "plan_date": plan_date,
+        "block_id": block_id,
+        "user_nickname": user_nickname,
+        "action": action,
+        "old_responsible": old_responsible,
+        "new_responsible": new_responsible,
+        "place_alias": place_alias,
+        "block_kind": block_kind,
+        "weekday": weekday,
+        "delta": delta or {},
+    }
+    result = client.table("plan_feedback").insert(payload).execute()
+    return result.data[0]
+
+
+def list_recent_plan_feedback(days: int = 90) -> List[Dict[str, Any]]:
+    """Raw feedback rows para el agregador de preferencias."""
+    from datetime import date, timedelta
+    client = get_supabase()
+    since = (date.today() - timedelta(days=days)).isoformat()
+    result = (
+        client.table("plan_feedback")
+        .select("*")
+        .gte("plan_date", since)
+        .order("plan_date", desc=False)
+        .execute()
+    )
+    return result.data

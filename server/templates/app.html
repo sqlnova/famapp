@@ -177,6 +177,20 @@
                     <span x-show="b.merged_from_count > 1" class="text-iosBlue">🔗 combinado</span>
                     <span x-show="b.needs_review" class="text-amber-600">⚠ revisar</span>
                   </div>
+                  <div class="flex items-center gap-1.5 mt-1.5">
+                    <button
+                      @click="acceptBlock(b)"
+                      :disabled="blockFeedback[b.id] === 'accept'"
+                      class="text-xs px-2 py-0.5 rounded-full border transition"
+                      :class="blockFeedback[b.id] === 'accept' ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'border-slate-200 text-slate-600 hover:bg-emerald-50 hover:border-emerald-200'">
+                      <span x-text="blockFeedback[b.id] === 'accept' ? '✓ Aceptado' : 'Aceptar'"></span>
+                    </button>
+                    <button
+                      @click="overrideBlock(b)"
+                      class="text-xs px-2 py-0.5 rounded-full border border-slate-200 text-slate-600 hover:bg-amber-50 hover:border-amber-200 transition">
+                      Cambiar
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -657,6 +671,8 @@
         planLoading: false,
         planError: '',
         upcomingPlans: [],
+        blockFeedback: {},
+        supportMembers: [],
         shoppingPending: [],
         get shoppingCategories() {
           const grouped = {}
@@ -758,13 +774,14 @@
         },
 
         async loadData() {
-          const [events, shopping, family, places, routines, tasks] = await Promise.all([
+          const [events, shopping, family, places, routines, tasks, support] = await Promise.all([
             this.api('/events'),
             this.api('/shopping'),
             this.api('/family'),
             this.api('/places'),
             this.api('/routines'),
             this.api('/tasks'),
+            this.api('/support'),
           ])
           this.events = Array.isArray(events) ? events : []
           this.shoppingPending = shopping?.pending && Array.isArray(shopping.pending) ? shopping.pending : []
@@ -772,6 +789,7 @@
           this.places = Array.isArray(places) ? places : []
           this.routines = Array.isArray(routines) ? routines : []
           this.tasks = Array.isArray(tasks) ? tasks : []
+          this.supportMembers = Array.isArray(support) ? support : []
           // Plan del día + próximos 2 días (no bloqueante)
           this.loadPlan()
           this.loadUpcoming()
@@ -801,6 +819,7 @@
           const result = await this.api(`/plan/${this.todayISO()}`)
           if (result && !result.__error) {
             this.plan = result
+            this.blockFeedback = {}
           } else if (result?.__error) {
             this.planError = result.__error
           }
@@ -812,6 +831,48 @@
           const dates = [1, 2].map(o => this.offsetDateISO(o))
           const results = await Promise.all(dates.map(d => this.api(`/plan/${d}`)))
           this.upcomingPlans = results.filter(p => p && !p.__error)
+        },
+
+        async acceptBlock(block) {
+          if (!this.plan?.date) return
+          this.blockFeedback = { ...this.blockFeedback, [block.id]: 'accept' }
+          await this.api(`/plan/${this.plan.date}/feedback`, {
+            method: 'POST',
+            body: JSON.stringify({
+              block_id: block.id,
+              action: 'accept',
+              new_responsible: block.responsible,
+              place_alias: block.location_alias,
+              block_kind: block.kind,
+            }),
+          })
+        },
+
+        async overrideBlock(block) {
+          if (!this.plan?.date) return
+          const nicknames = [
+            ...this.family.map(m => m.nickname).filter(Boolean),
+            ...((this.supportMembers || []).map(m => m.nickname)).filter(Boolean),
+          ]
+          const hint = nicknames.length ? ` (${nicknames.join(', ')})` : ''
+          const newResp = prompt(`¿Quién va a hacerlo?${hint}`, block.responsible || '')
+          if (!newResp || newResp === block.responsible) return
+          const clean = newResp.trim().toLowerCase()
+          const oldResp = block.responsible
+          // Optimista: actualizar en memoria para feedback visual inmediato.
+          block.responsible = clean
+          this.blockFeedback = { ...this.blockFeedback, [block.id]: 'override' }
+          await this.api(`/plan/${this.plan.date}/feedback`, {
+            method: 'POST',
+            body: JSON.stringify({
+              block_id: block.id,
+              action: 'override',
+              old_responsible: oldResp,
+              new_responsible: clean,
+              place_alias: block.location_alias,
+              block_kind: block.kind,
+            }),
+          })
         },
 
         statusMeta(status) {
