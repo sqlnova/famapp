@@ -1,6 +1,8 @@
 """FastAPI app – Twilio WhatsApp webhook + health endpoints."""
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -25,6 +27,14 @@ logger = structlog.get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # /api/plan dispara 6 queries en run_in_executor y el Home lanza 4 de esos
+    # endpoints en paralelo (hoy + 3 días) + /api/events + /api/routines. El
+    # pool default de asyncio (min(32, cpu+4)) queda chico en Railway (1-2 CPUs),
+    # saturando y causando timeouts del proxy. Fijamos un pool I/O-bound amplio.
+    io_executor = ThreadPoolExecutor(max_workers=32, thread_name_prefix="famapp-io")
+    asyncio.get_event_loop().set_default_executor(io_executor)
+    logger.info("io_executor_configured", max_workers=32)
+
     s = get_settings()
     scheduler = None
     if s.google_maps_api_key:
@@ -42,6 +52,7 @@ async def lifespan(app: FastAPI):
     if scheduler:
         from agents.logistics.proactive import stop_scheduler
         stop_scheduler()
+    io_executor.shutdown(wait=False)
 
 
 app = FastAPI(title="FamApp", version="0.3.0", lifespan=lifespan)
