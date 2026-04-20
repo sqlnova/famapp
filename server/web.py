@@ -384,6 +384,26 @@ async def api_events(user=Depends(require_auth), x_user_nickname: Optional[str] 
     events = await loop.run_in_executor(None, lambda: list_upcoming_events(days=30))
     # Use nickname from header if provided, otherwise try to infer from email
     user_nickname = (x_user_nickname or "").strip().lower() if x_user_nickname else _infer_user_nickname(user)
+
+    # Calcular sugerencias de salida en paralelo: cada _suggest_departure puede
+    # golpear Google Maps (sync), serializarlas sumaba cientos de ms por evento.
+    departure_tasks: Dict[str, asyncio.Future] = {}
+    for e in events:
+        if (
+            user_nickname
+            and (e.responsible_nickname or "").strip().lower() == user_nickname
+            and e.location
+            and e.id not in departure_tasks
+        ):
+            departure_tasks[e.id] = loop.run_in_executor(
+                None, _suggest_departure, e.start, e.location
+            )
+    departures: Dict[str, Optional[str]] = {}
+    if departure_tasks:
+        results = await asyncio.gather(*departure_tasks.values(), return_exceptions=True)
+        for eid, res in zip(departure_tasks.keys(), results):
+            departures[eid] = res if not isinstance(res, Exception) else None
+
     return [
         {
             "id": e.id,
@@ -395,9 +415,7 @@ async def api_events(user=Depends(require_auth), x_user_nickname: Optional[str] 
             "children": e.children,
             "recurring_event_id": e.recurring_event_id,
             "is_recurring": not e.alerts_enabled,
-            "suggested_departure": _suggest_departure(e.start, e.location)
-            if user_nickname and (e.responsible_nickname or "").strip().lower() == user_nickname
-            else None,
+            "suggested_departure": departures.get(e.id),
         }
         for e in events
     ]
@@ -939,15 +957,31 @@ async def api_routines(user=Depends(require_auth), x_user_nickname: Optional[str
             "place_name": place_name,
             "is_active": r.get("is_active", True) if is_dict else r.is_active,
         }
-        # Calculate suggested departure times if user is responsible
-        if user_nickname:
+        rows.append(row)
+
+    # Calcular sugerencias de salida en paralelo (cada una puede hacer un Maps
+    # call sync). Serializadas acumulaban 500ms-2s para un usuario con varias
+    # rutinas responsables.
+    if user_nickname:
+        loop = asyncio.get_event_loop()
+        tasks: List[tuple[int, str, asyncio.Future]] = []
+        for idx, row in enumerate(rows):
+            location = row["place_name"] or row["place_alias"]
             outbound_resp = (row.get("outbound_responsible") or "").strip().lower()
             return_resp = (row.get("return_responsible") or "").strip().lower()
             if outbound_resp == user_nickname:
-                row["suggested_departure_outbound"] = _suggest_departure_for_routine(row.get("outbound_time"), location)
+                tasks.append((idx, "suggested_departure_outbound", loop.run_in_executor(
+                    None, _suggest_departure_for_routine, row.get("outbound_time"), location
+                )))
             if return_resp == user_nickname:
-                row["suggested_departure_return"] = _suggest_departure_for_routine(row.get("return_time"), location)
-        rows.append(row)
+                tasks.append((idx, "suggested_departure_return", loop.run_in_executor(
+                    None, _suggest_departure_for_routine, row.get("return_time"), location
+                )))
+        if tasks:
+            results = await asyncio.gather(*(t[2] for t in tasks), return_exceptions=True)
+            for (idx, field, _), res in zip(tasks, results):
+                if not isinstance(res, Exception):
+                    rows[idx][field] = res
 
     return rows
 
@@ -1350,7 +1384,9 @@ async def api_daily_plan(date: str, user=Depends(require_auth)):
         preferences=preferences,
     )
 
-    plan = plan_day(date=date, events=day_events, ctx=ctx)
+    # plan_day es CPU-bound (normalize → merge → assign → conflicts → feasibility);
+    # si corre en el event loop bloquea otras requests concurrentes.
+    plan = await loop.run_in_executor(None, lambda: plan_day(date=date, events=day_events, ctx=ctx))
     return _serialize_plan(plan)
 
 

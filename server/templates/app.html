@@ -843,7 +843,12 @@
         },
 
         async loadData() {
-          const [events, shopping, family, places, routines, tasks, support] = await Promise.all([
+          // Plan de HOY viaja en el mismo Promise.all para que esté listo
+          // cuando el spinner de "Cargando FamApp" desaparece. Los próximos
+          // días cargan en background (no bloquean el render inicial).
+          this.planLoading = true
+          const todayISO = this.todayISO()
+          const [events, shopping, family, places, routines, tasks, support, plan] = await Promise.all([
             this.api('/events'),
             this.api('/shopping'),
             this.api('/family'),
@@ -851,6 +856,7 @@
             this.api('/routines'),
             this.api('/tasks'),
             this.api('/support'),
+            this.api(`/plan/${todayISO}`),
           ])
           this.events = Array.isArray(events) ? events : []
           this.shoppingPending = shopping?.pending && Array.isArray(shopping.pending) ? shopping.pending : []
@@ -859,8 +865,14 @@
           this.routines = Array.isArray(routines) ? routines : []
           this.tasks = Array.isArray(tasks) ? tasks : []
           this.supportMembers = Array.isArray(support) ? support : []
-          // Plan del día + próximos 2 días (no bloqueante)
-          this.loadPlan()
+          if (plan && !plan.__error) {
+            this.plan = plan
+            this.blockFeedback = {}
+          } else if (plan?.__error) {
+            this.planError = plan.__error
+          }
+          this.planLoading = false
+          // Próximos días en background
           this.loadUpcoming()
 
           // Show nickname selector only when we have members to choose from
@@ -931,10 +943,11 @@
           if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
         },
 
-        async acceptBlock(block) {
+        acceptBlock(block) {
           if (!this.plan?.date) return
+          // Optimista: actualizamos UI al toque y disparamos el POST en background.
           this.blockFeedback = { ...this.blockFeedback, [block.id]: 'accept' }
-          await this.api(`/plan/${this.plan.date}/feedback`, {
+          this.api(`/plan/${this.plan.date}/feedback`, {
             method: 'POST',
             body: JSON.stringify({
               block_id: block.id,
@@ -946,7 +959,7 @@
           })
         },
 
-        async overrideBlock(block) {
+        overrideBlock(block) {
           if (!this.plan?.date) return
           const nicknames = [
             ...this.family.map(m => m.nickname).filter(Boolean),
@@ -957,10 +970,10 @@
           if (!newResp || newResp === block.responsible) return
           const clean = newResp.trim().toLowerCase()
           const oldResp = block.responsible
-          // Optimista: actualizar en memoria para feedback visual inmediato.
+          // Optimista: actualizamos UI y disparamos el POST en background.
           block.responsible = clean
           this.blockFeedback = { ...this.blockFeedback, [block.id]: 'override' }
-          await this.api(`/plan/${this.plan.date}/feedback`, {
+          this.api(`/plan/${this.plan.date}/feedback`, {
             method: 'POST',
             body: JSON.stringify({
               block_id: block.id,
