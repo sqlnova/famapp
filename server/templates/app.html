@@ -577,6 +577,43 @@
         </div>
       </section>
 
+      <!-- ── Tareas escolares ──────────────────────────────────────── -->
+      <section x-show="view==='homework'" class="space-y-3">
+        <div class="bg-white rounded-3xl p-4 border border-slate-100 space-y-2">
+          <h3 class="font-medium">Agregar tarea</h3>
+          <div class="grid grid-cols-2 gap-2">
+            <input x-model="newHomework.child_name" placeholder="Nombre del hijo" class="col-span-2 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newHomework.subject" placeholder="Materia" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="newHomework.due_date" type="date" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          </div>
+          <input x-model="newHomework.description" placeholder="Descripción de la tarea" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <button @click="addHomework" class="w-full bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Agregar tarea</button>
+        </div>
+
+        <div class="bg-white rounded-3xl p-4 border border-slate-100">
+          <h3 class="font-medium mb-3">Pendientes</h3>
+          <template x-for="group in homeworkByChild" :key="group.child">
+            <div class="mb-4">
+              <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2" x-text="group.child"></p>
+              <template x-for="task in group.tasks" :key="task.id">
+                <div class="py-2 border-b border-slate-100 last:border-b-0 flex items-start justify-between gap-2">
+                  <div class="flex-1">
+                    <p class="text-sm font-medium" x-text="task.description"></p>
+                    <p class="text-xs text-slate-500">
+                      <span x-text="task.subject"></span>
+                      <span class="mx-1">·</span>
+                      <span :class="homeworkUrgencyClass(task.due_date)" x-text="fmtDueDate(task.due_date)"></span>
+                    </p>
+                  </div>
+                  <button @click="markHomeworkDone(task.id)" class="text-xs text-green-600 shrink-0 mt-0.5">✓ Entregada</button>
+                </div>
+              </template>
+            </div>
+          </template>
+          <p x-show="homework.length===0" class="text-sm text-slate-400">No hay tareas pendientes. ✅</p>
+        </div>
+      </section>
+
       <section x-show="view==='routines'" class="space-y-3">
         <div class="flex justify-between items-center">
           <div>
@@ -708,7 +745,7 @@
     </main>
 
     <nav class="fixed left-0 right-0 bottom-0 bg-white border-t border-slate-200 safe-bottom z-30">
-      <div class="max-w-3xl mx-auto grid grid-cols-6">
+      <div class="max-w-3xl mx-auto grid grid-cols-7">
         <template x-for="tab in tabs" :key="tab.id">
           <button @click="view = tab.id" class="py-3 text-xs font-medium"
             :class="view===tab.id ? 'text-iosBlue' : 'text-slate-500'">
@@ -737,6 +774,7 @@
           { id: 'home', icon: '🏠', label: 'Inicio' },
           { id: 'agenda', icon: '🗓️', label: 'Agenda' },
           { id: 'shopping', icon: '🛒', label: 'Compras' },
+          { id: 'homework', icon: '📚', label: 'Tareas' },
           { id: 'agent', icon: '🤖', label: 'Agente' },
           { id: 'routines', icon: '🔁', label: 'Rutinas' },
           { id: 'more', icon: '⚙️', label: 'Más' },
@@ -776,6 +814,19 @@
         places: [],
         routines: [],
         tasks: [],
+        homework: [],
+        newHomework: { child_name: '', subject: '', description: '', due_date: '' },
+        get homeworkByChild() {
+          const grouped = {}
+          for (const t of this.homework) {
+            if (!grouped[t.child_name]) grouped[t.child_name] = []
+            grouped[t.child_name].push(t)
+          }
+          return Object.keys(grouped).sort().map(child => ({
+            child,
+            tasks: grouped[child].sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '')),
+          }))
+        },
         newShopping: { name: '', quantity: '', unit: '' },
         newTask: { title: '', assignee: '', due_date: '' },
         newPlace: { alias: '', name: '', address: '', type: '' },
@@ -866,7 +917,7 @@
           // días cargan en background (no bloquean el render inicial).
           this.planLoading = true
           const todayISO = this.todayISO()
-          const [events, shopping, family, places, routines, tasks, support, plan] = await Promise.all([
+          const [events, shopping, family, places, routines, tasks, support, homework, plan] = await Promise.all([
             this.api('/events'),
             this.api('/shopping'),
             this.api('/family'),
@@ -874,6 +925,7 @@
             this.api('/routines'),
             this.api('/tasks'),
             this.api('/support'),
+            this.api('/homework'),
             this.api(`/plan/${todayISO}`),
           ])
           this.events = Array.isArray(events) ? events : []
@@ -883,6 +935,7 @@
           this.routines = Array.isArray(routines) ? routines : []
           this.tasks = Array.isArray(tasks) ? tasks : []
           this.supportMembers = Array.isArray(support) ? support : []
+          this.homework = Array.isArray(homework) ? homework : []
           if (plan && !plan.__error) {
             this.plan = plan
             this.blockFeedback = {}
@@ -1773,8 +1826,53 @@
           return `${raw.slice(0, 3)}••••${raw.slice(-2)}`
         },
 
+        async addHomework() {
+          const { child_name, subject, description, due_date } = this.newHomework
+          if (!child_name.trim() || !description.trim() || !due_date) {
+            alert('Completá nombre del hijo, descripción y fecha límite.')
+            return
+          }
+          const res = await this.api('/homework', {
+            method: 'POST',
+            body: JSON.stringify({ child_name: child_name.trim(), subject: subject.trim() || 'General', description: description.trim(), due_date }),
+          })
+          if (res && !res.__error) {
+            this.newHomework = { child_name: '', subject: '', description: '', due_date: '' }
+            const fresh = await this.api('/homework')
+            this.homework = Array.isArray(fresh) ? fresh : this.homework
+          }
+        },
+
+        async markHomeworkDone(taskId) {
+          await this.api(`/homework/${taskId}/done`, { method: 'PUT' })
+          this.homework = this.homework.filter(t => t.id !== taskId)
+        },
+
+        fmtDueDate(iso) {
+          if (!iso) return ''
+          const today = new Date()
+          today.setHours(0, 0, 0, 0)
+          const due = new Date(iso + 'T00:00:00')
+          const diff = Math.round((due - today) / 86400000)
+          if (diff < 0) return `⚠️ Vencida`
+          if (diff === 0) return `🔴 Hoy`
+          if (diff === 1) return `🟠 Mañana`
+          if (diff === 2) return `🟡 Pasado mañana`
+          return due.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })
+        },
+
+        homeworkUrgencyClass(iso) {
+          if (!iso) return ''
+          const today = new Date(); today.setHours(0,0,0,0)
+          const diff = Math.round((new Date(iso + 'T00:00:00') - today) / 86400000)
+          if (diff < 0) return 'text-red-600 font-semibold'
+          if (diff <= 1) return 'text-orange-600 font-semibold'
+          if (diff <= 2) return 'text-yellow-600'
+          return 'text-slate-500'
+        },
+
         headerTitle() {
-          const names = { home: 'Inicio', agenda: 'Agenda', shopping: 'Compras', routines: 'Rutinas', more: 'Configuración' }
+          const names = { home: 'Inicio', agenda: 'Agenda', shopping: 'Compras', homework: 'Tareas escolares', routines: 'Rutinas', more: 'Configuración' }
           return names[this.view] || 'FamApp'
         },
       }))

@@ -8,6 +8,7 @@ import structlog
 
 from core.models import HomeworkTask
 from core.supabase_client import add_homework_task, get_pending_homework, mark_homework_done
+from famapp.monitoring import send_event
 
 logger = structlog.get_logger(__name__)
 
@@ -40,14 +41,23 @@ async def handle_homework_request(
 ) -> str:
     """Process a homework intent: add a task, list pending ones, or mark one as done."""
     action = (entities.get("action") or "add").strip().lower()
+    await send_event("homework", "active", f"action={action}")
 
-    if action == "list":
-        return await _list_homework(entities)
+    try:
+        if action == "list":
+            result = await _list_homework(entities)
+        elif action == "mark_done":
+            result = await _mark_done(entities)
+        else:
+            result = await _add_homework(sender, entities)
+    except Exception as exc:
+        await send_event("homework", "error", f"homework failed: {exc}")
+        raise
+    await send_event("homework", "idle", f"action={action} done")
+    return result
 
-    if action == "mark_done":
-        return await _mark_done(entities)
 
-    # ── Add homework task ─────────────────────────────────────────────────────
+async def _add_homework(sender: str, entities: Dict[str, Any]) -> str:
     child_name = (entities.get("child_name") or "").strip()
     description = (entities.get("description") or "").strip()
     subject = (entities.get("subject") or "General").strip()

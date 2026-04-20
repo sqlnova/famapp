@@ -381,9 +381,59 @@ def start_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=3600,  # run if missed by up to 1 hour (e.g. server restart)
     )
 
+    # Homework reminders: D-2 at 8 PM and D-1 at 8 AM Argentina time
+    _scheduler.add_job(
+        _run_homework_reminders,
+        trigger=CronTrigger(hour=20, minute=0, timezone="America/Argentina/Buenos_Aires"),
+        id="homework_reminder_d2",
+        name="Homework reminders D-2 (8 PM AR)",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    _scheduler.add_job(
+        _run_homework_reminders,
+        trigger=CronTrigger(hour=8, minute=0, timezone="America/Argentina/Buenos_Aires"),
+        id="homework_reminder_d1",
+        name="Homework reminders D-1 (8 AM AR)",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     _scheduler.start()
     logger.info("scheduler_started", interval_min=s.scheduler_interval_minutes)
     return _scheduler
+
+
+async def _run_homework_reminders() -> None:
+    """Send WhatsApp reminders for homework due in 1 or 2 days."""
+    from datetime import date
+    from core.supabase_client import get_pending_homework
+    try:
+        tasks = get_pending_homework()
+        today = date.today()
+        due_soon = [
+            t for t in tasks
+            if (date.fromisoformat(t.due_date) - today).days in (1, 2)
+        ]
+        if not due_soon:
+            return
+
+        by_child: dict = {}
+        for t in due_soon:
+            by_child.setdefault(t.child_name, []).append(t)
+
+        lines = ["📚 *Recordatorio de tareas:*"]
+        for child, child_tasks in sorted(by_child.items()):
+            lines.append(f"\n*{child}*")
+            for t in sorted(child_tasks, key=lambda x: x.due_date):
+                diff = (date.fromisoformat(t.due_date) - today).days
+                when = "mañana" if diff == 1 else "pasado mañana"
+                lines.append(f"  • {t.description} ({t.subject}) — vence *{when}*")
+
+        await broadcast_whatsapp_message("\n".join(lines))
+        logger.info("homework_reminders_sent", count=len(due_soon))
+    except Exception:
+        logger.exception("homework_reminders_error")
 
 
 async def _run_daily_summary() -> None:
