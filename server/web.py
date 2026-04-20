@@ -803,8 +803,6 @@ async def chat_with_agent(payload: Dict[str, Any] = Body(...), user=Depends(requ
         "intent": str(final_state.get("intent").value) if final_state.get("intent") else "unknown",
         "confidence": float(final_state.get("confidence") or 0.0),
         "route_to": final_state.get("route_to") or "direct",
-        "entities": final_state.get("entities") or {},
-        "summary": final_state.get("summary") or "",
     }
 
 
@@ -1433,7 +1431,7 @@ async def api_daily_plan(date: str, user=Depends(require_auth)):
         # concreta en vez de un "Internal Server Error" genérico.
         raise HTTPException(
             status_code=500,
-            detail=f"plan_day falló: {type(exc).__name__}: {str(exc)[:300]}",
+            detail="No se pudo generar el plan del día. Revisá los eventos y rutinas.",
         ) from exc
 
     return _serialize_plan(plan)
