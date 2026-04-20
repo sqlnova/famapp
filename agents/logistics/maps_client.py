@@ -1,6 +1,8 @@
 """Google Maps Directions client – travel time with real traffic."""
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -14,6 +16,15 @@ logger = structlog.get_logger(__name__)
 
 _client: Optional[googlemaps.Client] = None
 
+# Caché TTL: el mismo endpoint (/api/events, /api/routines, /api/plan)
+# pide duración para los mismos (origen, destino, hora aprox) múltiples
+# veces por render. El tráfico no cambia significativamente en 10 min,
+# y las llamadas a Maps son el cuello más caro (latencia red + billing).
+_TRAVEL_CACHE_TTL = 600.0
+_TRAVEL_BUCKET_SECONDS = 600  # redondeo de departure_time a 10 minutos
+_travel_cache: dict[tuple, tuple[float, "TravelInfo"]] = {}
+_travel_cache_lock = threading.Lock()
+
 
 def _get_maps() -> googlemaps.Client:
     global _client
@@ -23,6 +34,23 @@ def _get_maps() -> googlemaps.Client:
             raise RuntimeError("GOOGLE_MAPS_API_KEY is not set")
         _client = googlemaps.Client(key=s.google_maps_api_key)
     return _client
+
+
+def _travel_cache_get(key: tuple) -> Optional["TravelInfo"]:
+    with _travel_cache_lock:
+        entry = _travel_cache.get(key)
+        if entry is None:
+            return None
+        expires_at, value = entry
+        if time.monotonic() >= expires_at:
+            _travel_cache.pop(key, None)
+            return None
+        return value
+
+
+def _travel_cache_set(key: tuple, value: "TravelInfo") -> None:
+    with _travel_cache_lock:
+        _travel_cache[key] = (time.monotonic() + _TRAVEL_CACHE_TTL, value)
 
 
 @dataclass
@@ -63,10 +91,19 @@ def get_travel_time(
         origin: Override the home address from config.
     """
     s = get_settings()
-    maps = _get_maps()
     origin = origin or s.home_address
     departure_time = departure_time or datetime.now(timezone.utc)
 
+    # Redondeamos al bucket de 10 min para maximizar hits entre llamadas
+    # que piden rutas para horarios cercanos (mismo evento visto desde
+    # distintos endpoints en un render del Home).
+    bucket = int(departure_time.timestamp()) // _TRAVEL_BUCKET_SECONDS
+    cache_key = (origin, destination, bucket)
+    cached = _travel_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    maps = _get_maps()
     logger.info("maps_request", origin=origin, destination=destination)
 
     result = maps.directions(
@@ -98,4 +135,5 @@ def get_travel_time(
         duration_minutes=info.duration_minutes,
         distance_km=info.distance_km,
     )
+    _travel_cache_set(cache_key, info)
     return info
