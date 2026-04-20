@@ -102,6 +102,21 @@
       <!-- ── Centro de Operaciones Familiar ──────────────────────────── -->
       <section x-show="view==='home'" class="space-y-3">
 
+        <!-- Aviso proactivo: mañana requiere decisiones -->
+        <button
+          x-show="tomorrowPlan && (tomorrowPlan.conflicts?.length > 0 || tomorrowPlan.status === 'revisar')"
+          @click="scrollToTomorrow()"
+          class="w-full rounded-2xl px-4 py-3 border border-amber-300 bg-amber-50 text-amber-900 flex items-center gap-3 shadow-sm">
+          <span class="text-xl">⚠️</span>
+          <div class="text-left flex-1">
+            <p class="text-sm font-semibold">Mañana requiere tu atención</p>
+            <p class="text-xs opacity-80">
+              <span x-text="(tomorrowPlan?.conflicts?.length || 0) + ' conflictos · resolver antes de dormir'"></span>
+            </p>
+          </div>
+          <span class="text-xs opacity-60">Ver ↓</span>
+        </button>
+
         <!-- Pulso del día: estado + factibilidad -->
         <div class="rounded-3xl p-5 border shadow-sm" :class="statusMeta().cls">
           <div class="flex items-start justify-between">
@@ -200,16 +215,68 @@
           </p>
         </div>
 
-        <!-- Próximamente (48 h) -->
-        <div x-show="upcomingPlans.length > 0" class="bg-white rounded-3xl border border-slate-100 shadow-sm p-4">
-          <h3 class="font-semibold mb-2 flex items-center gap-2">
-            <span>📅</span><span>Próximamente</span>
-          </h3>
-          <template x-for="p in upcomingPlans" :key="p.date">
-            <div class="flex items-center justify-between py-1.5 border-t first:border-t-0 border-slate-100 text-sm">
+        <!-- Mañana: previsión anticipada (conflictos, plan) -->
+        <div x-ref="tomorrowSection" x-show="tomorrowPlan" class="space-y-3">
+          <div class="rounded-3xl p-4 border shadow-sm" :class="statusMeta(tomorrowPlan?.status).cls">
+            <p class="text-xs uppercase tracking-wide opacity-70">Mañana · <span x-text="formatShortDay(tomorrowPlan?.date)"></span></p>
+            <p class="text-lg font-semibold mt-1 flex items-center gap-2">
+              <span x-text="statusMeta(tomorrowPlan?.status).emoji"></span>
+              <span x-text="statusMeta(tomorrowPlan?.status).label"></span>
+            </p>
+            <p class="text-sm opacity-80 mt-0.5" x-text="tomorrowSummary()"></p>
+          </div>
+
+          <!-- Conflictos de mañana -->
+          <div x-show="tomorrowPlan?.conflicts?.length > 0" class="bg-white rounded-3xl border border-amber-200 shadow-sm p-4">
+            <h3 class="font-semibold mb-2 flex items-center gap-2">
+              <span>⚠️</span><span>Requiere decisión antes de dormir</span>
+              <span class="ml-auto text-xs text-slate-400" x-text="tomorrowPlan?.conflicts?.length"></span>
+            </h3>
+            <template x-for="c in (tomorrowPlan?.conflicts || [])" :key="'tmrw-'+c.id">
+              <div class="py-2 border-t first:border-t-0 border-slate-100">
+                <p class="text-sm font-medium" x-text="conflictTitle(c)"></p>
+                <p class="text-xs text-slate-500 mt-0.5" x-text="c.explanation"></p>
+                <ul x-show="(c.suggested_resolutions || []).length > 0" class="mt-1.5 text-xs text-slate-600 space-y-0.5">
+                  <template x-for="(r, i) in (c.suggested_resolutions || [])" :key="'tmrw-'+c.id + '-' + i">
+                    <li>• <span x-text="r"></span></li>
+                  </template>
+                </ul>
+              </div>
+            </template>
+          </div>
+
+          <!-- Plan preview de mañana -->
+          <div x-show="(tomorrowPlan?.blocks?.length || 0) > 0" class="bg-white rounded-3xl border border-slate-100 shadow-sm p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-semibold">Plan de mañana</h3>
+              <span class="text-xs text-slate-400" x-text="(tomorrowPlan?.blocks?.length || 0) + ' bloques'"></span>
+            </div>
+            <template x-for="b in (tomorrowPlan?.blocks || [])" :key="'tmrw-b-'+b.id">
+              <div class="py-1.5 border-t first:border-t-0 border-slate-100">
+                <div class="flex items-start gap-3">
+                  <p class="text-sm font-mono text-slate-500 w-12 shrink-0 pt-0.5" x-text="formatTime(b.start)"></p>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm truncate" x-text="b.title"></p>
+                    <div class="flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+                      <span x-show="b.responsible" class="font-medium text-slate-700" x-text="b.responsible"></span>
+                      <span x-show="!b.responsible" class="text-amber-600">sin asignar</span>
+                      <span x-show="b.location_name || b.location_alias" x-text="'· ' + (b.location_name || b.location_alias)"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Pasado mañana y más adelante (chip compacto) -->
+        <div x-show="laterPlans.length > 0" class="bg-white rounded-3xl border border-slate-100 shadow-sm p-3">
+          <p class="text-xs uppercase tracking-wide text-slate-400 mb-1.5">Más adelante</p>
+          <template x-for="p in laterPlans" :key="p.date">
+            <div class="flex items-center justify-between py-1 text-sm">
               <div class="flex items-center gap-2">
-                <span class="font-mono text-slate-500 w-10" x-text="formatShortDay(p.date)"></span>
-                <span x-text="(p.blocks?.length || 0) + ' bloques'"></span>
+                <span class="font-mono text-slate-500 w-14" x-text="formatShortDay(p.date)"></span>
+                <span class="text-slate-600" x-text="(p.blocks?.length || 0) + ' bloques'"></span>
                 <span class="text-xs text-slate-400" x-text="'· ' + upcomingLabel(p.status)"></span>
               </div>
               <span x-text="statusMeta(p.status).emoji"></span>
@@ -830,9 +897,38 @@
 
         async loadUpcoming() {
           if (!this.token) return
-          const dates = [1, 2].map(o => this.offsetDateISO(o))
+          const dates = [1, 2, 3].map(o => this.offsetDateISO(o))
           const results = await Promise.all(dates.map(d => this.api(`/plan/${d}`)))
           this.upcomingPlans = results.filter(p => p && !p.__error)
+        },
+
+        get tomorrowPlan() {
+          const tmrw = this.offsetDateISO(1)
+          return this.upcomingPlans.find(p => p.date === tmrw) || null
+        },
+
+        get laterPlans() {
+          const tmrw = this.offsetDateISO(1)
+          return this.upcomingPlans.filter(p => p.date !== tmrw)
+        },
+
+        tomorrowSummary() {
+          const p = this.tomorrowPlan
+          if (!p) return ''
+          const blocks = p.blocks?.length || 0
+          const conflicts = p.conflicts?.length || 0
+          if (blocks === 0 && conflicts === 0) return 'Día tranquilo previsto.'
+          const parts = [`${blocks} bloques`]
+          if (conflicts) parts.push(`${conflicts} conflictos`)
+          if (p.feasibility_score != null) {
+            parts.push(`factibilidad ${Math.round(p.feasibility_score * 100)}%`)
+          }
+          return parts.join(' · ')
+        },
+
+        scrollToTomorrow() {
+          const el = this.$refs.tomorrowSection
+          if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
         },
 
         async acceptBlock(block) {
