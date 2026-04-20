@@ -1347,24 +1347,57 @@ async def api_daily_plan(date: str, user=Depends(require_auth)):
 
     loop = asyncio.get_event_loop()
 
+    # Cada fetch con fallback: si una dependencia falla (Google Calendar caído,
+    # migración nueva no aplicada, fila con schema inesperado) el plan se
+    # degrada con gracia en vez de devolver 500 opaco.
+    def _safe_events():
+        try:
+            return list_upcoming_events(days=7, max_results=300)
+        except Exception:
+            logger.exception("plan_events_fetch_failed", date=date)
+            return []
+
+    def _safe_family():
+        try:
+            return get_family_members()
+        except Exception:
+            logger.exception("plan_family_fetch_failed", date=date)
+            return []
+
+    def _safe_places():
+        try:
+            return get_all_known_places()
+        except Exception:
+            logger.exception("plan_places_fetch_failed", date=date)
+            return []
+
+    def _safe_routines():
+        try:
+            return list_family_routines()
+        except Exception:
+            logger.exception("plan_routines_fetch_failed", date=date)
+            return []
+
     def _safe_list_support():
         try:
             return list_support_members(only_active=True)
         except Exception:
+            logger.exception("plan_support_fetch_failed", date=date)
             return []
 
     def _safe_list_preferences():
         try:
             return list_preference_profiles()
         except Exception:
+            logger.exception("plan_preferences_fetch_failed", date=date)
             return []
 
     # Fetch de datos en paralelo (todo I/O)
     all_events, family_members, places, routines, support, preferences = await asyncio.gather(
-        loop.run_in_executor(None, lambda: list_upcoming_events(days=7, max_results=300)),
-        loop.run_in_executor(None, get_family_members),
-        loop.run_in_executor(None, get_all_known_places),
-        loop.run_in_executor(None, list_family_routines),
+        loop.run_in_executor(None, _safe_events),
+        loop.run_in_executor(None, _safe_family),
+        loop.run_in_executor(None, _safe_places),
+        loop.run_in_executor(None, _safe_routines),
         loop.run_in_executor(None, _safe_list_support),
         loop.run_in_executor(None, _safe_list_preferences),
     )
@@ -1386,7 +1419,23 @@ async def api_daily_plan(date: str, user=Depends(require_auth)):
 
     # plan_day es CPU-bound (normalize → merge → assign → conflicts → feasibility);
     # si corre en el event loop bloquea otras requests concurrentes.
-    plan = await loop.run_in_executor(None, lambda: plan_day(date=date, events=day_events, ctx=ctx))
+    try:
+        plan = await loop.run_in_executor(None, lambda: plan_day(date=date, events=day_events, ctx=ctx))
+    except Exception as exc:
+        logger.exception(
+            "plan_day_failed",
+            date=date,
+            events_count=len(day_events),
+            family_count=len(family_members),
+            routines_count=len(routines),
+        )
+        # Exponer el tipo y mensaje al cliente para que el usuario vea la causa
+        # concreta en vez de un "Internal Server Error" genérico.
+        raise HTTPException(
+            status_code=500,
+            detail=f"plan_day falló: {type(exc).__name__}: {str(exc)[:300]}",
+        ) from exc
+
     return _serialize_plan(plan)
 
 
