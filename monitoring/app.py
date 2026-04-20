@@ -31,6 +31,7 @@ KNOWN_AGENTS: List[str] = [
     "schedule",
     "logistics",
     "shopping",
+    "homework",
 ]
 VALID_STATUSES: Set[str] = {"idle", "active", "error"}
 MAX_EVENTS = 200

@@ -587,7 +587,11 @@
             <input x-model="newHomework.due_date" type="date" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
           </div>
           <input x-model="newHomework.description" placeholder="Descripción de la tarea" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <button @click="addHomework" class="w-full bg-iosBlue text-white rounded-2xl py-2.5 text-sm">Agregar tarea</button>
+          <p x-show="homeworkError" x-text="homeworkError" class="text-sm text-red-500"></p>
+          <button @click="addHomework" :disabled="homeworkSaving" class="w-full bg-iosBlue text-white rounded-2xl py-2.5 text-sm disabled:opacity-60">
+            <span x-show="!homeworkSaving">Agregar tarea</span>
+            <span x-show="homeworkSaving">Guardando…</span>
+          </button>
         </div>
 
         <div class="bg-white rounded-3xl p-4 border border-slate-100">
@@ -816,6 +820,8 @@
         tasks: [],
         homework: [],
         newHomework: { child_name: '', subject: '', description: '', due_date: '' },
+        homeworkError: '',
+        homeworkSaving: false,
         get homeworkByChild() {
           const grouped = {}
           for (const t of this.homework) {
@@ -1828,19 +1834,23 @@
 
         async addHomework() {
           const { child_name, subject, description, due_date } = this.newHomework
-          if (!child_name.trim() || !description.trim() || !due_date) {
-            alert('Completá nombre del hijo, descripción y fecha límite.')
-            return
-          }
+          this.homeworkError = ''
+          if (!child_name.trim()) { this.homeworkError = 'Ingresá el nombre del hijo.'; return }
+          if (!description.trim()) { this.homeworkError = 'Ingresá la descripción de la tarea.'; return }
+          if (!due_date) { this.homeworkError = 'Seleccioná la fecha límite.'; return }
+          this.homeworkSaving = true
           const res = await this.api('/homework', {
             method: 'POST',
             body: JSON.stringify({ child_name: child_name.trim(), subject: subject.trim() || 'General', description: description.trim(), due_date }),
           })
-          if (res && !res.__error) {
-            this.newHomework = { child_name: '', subject: '', description: '', due_date: '' }
-            const fresh = await this.api('/homework')
-            this.homework = Array.isArray(fresh) ? fresh : this.homework
+          this.homeworkSaving = false
+          if (!res || res.__error) {
+            this.homeworkError = res?.__error || 'Error al guardar la tarea.'
+            return
           }
+          this.newHomework = { child_name: '', subject: '', description: '', due_date: '' }
+          const fresh = await this.api('/homework')
+          this.homework = Array.isArray(fresh) ? fresh : this.homework
         },
 
         async markHomeworkDone(taskId) {
