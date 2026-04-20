@@ -1350,7 +1350,9 @@ async def api_daily_plan(date: str, user=Depends(require_auth)):
         preferences=preferences,
     )
 
-    plan = plan_day(date=date, events=day_events, ctx=ctx)
+    # plan_day es CPU-bound (normalize → merge → assign → conflicts → feasibility);
+    # si corre en el event loop bloquea otras requests concurrentes.
+    plan = await loop.run_in_executor(None, lambda: plan_day(date=date, events=day_events, ctx=ctx))
     return _serialize_plan(plan)
 
 
