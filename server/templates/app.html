@@ -102,20 +102,33 @@
       <!-- ── Centro de Operaciones Familiar ──────────────────────────── -->
       <section x-show="view==='home'" class="space-y-3">
 
-        <!-- Aviso proactivo: mañana requiere decisiones -->
+        <!-- Aviso de mañana: siempre visible si tenemos plan de mañana -->
         <button
-          x-show="tomorrowPlan && (tomorrowPlan.conflicts?.length > 0 || tomorrowPlan.status === 'revisar')"
+          x-show="tomorrowPlan && ((tomorrowPlan.blocks?.length || 0) > 0 || (tomorrowPlan.conflicts?.length || 0) > 0)"
           @click="scrollToTomorrow()"
-          class="w-full rounded-2xl px-4 py-3 border border-amber-300 bg-amber-50 text-amber-900 flex items-center gap-3 shadow-sm">
-          <span class="text-xl">⚠️</span>
-          <div class="text-left flex-1">
-            <p class="text-sm font-semibold">Mañana requiere tu atención</p>
+          class="w-full rounded-2xl px-4 py-3 border flex items-center gap-3 shadow-sm text-left"
+          :class="(tomorrowPlan?.conflicts?.length > 0 || tomorrowPlan?.status === 'revisar')
+            ? 'bg-amber-50 border-amber-300 text-amber-900'
+            : 'bg-blue-50 border-blue-200 text-blue-900'">
+          <span class="text-xl" x-text="(tomorrowPlan?.conflicts?.length > 0 || tomorrowPlan?.status === 'revisar') ? '⚠️' : '📅'"></span>
+          <div class="flex-1">
+            <p class="text-sm font-semibold">
+              <span x-text="(tomorrowPlan?.conflicts?.length > 0 || tomorrowPlan?.status === 'revisar') ? 'Mañana requiere tu atención' : 'Qué viene mañana'"></span>
+            </p>
             <p class="text-xs opacity-80">
-              <span x-text="(tomorrowPlan?.conflicts?.length || 0) + ' conflictos · resolver antes de dormir'"></span>
+              <span x-text="(tomorrowPlan?.blocks?.length || 0) + ' bloques'"></span>
+              <span x-show="(tomorrowPlan?.conflicts?.length || 0) > 0"> · <span x-text="tomorrowPlan.conflicts.length + ' conflictos'"></span></span>
             </p>
           </div>
           <span class="text-xs opacity-60">Ver ↓</span>
         </button>
+
+        <!-- Si falló la carga del plan de mañana, avisar para no dejarlo silencioso -->
+        <div x-show="!tomorrowPlan && upcomingError" class="w-full rounded-2xl px-4 py-3 border border-rose-200 bg-rose-50 text-rose-900">
+          <p class="text-sm font-semibold">No pude cargar el plan de mañana</p>
+          <p class="text-xs opacity-80 break-words" x-text="upcomingError"></p>
+          <button @click="loadUpcoming()" class="mt-2 text-xs px-2 py-1 rounded-full border border-rose-300 hover:bg-rose-100">Reintentar</button>
+        </div>
 
         <!-- Pulso del día: estado + factibilidad -->
         <div class="rounded-3xl p-5 border shadow-sm" :class="statusMeta().cls">
@@ -127,11 +140,15 @@
                 <span x-text="statusMeta().label"></span>
               </p>
             </div>
-            <button @click="loadPlan()" class="text-xs opacity-60 hover:opacity-100" title="Actualizar">↻</button>
+            <button @click="loadPlan(); loadUpcoming()" class="text-xs opacity-60 hover:opacity-100" title="Actualizar">↻</button>
           </div>
           <p class="text-sm opacity-80 mt-1" x-text="pulseSummary()"></p>
           <p x-show="plan && plan.feasibility_score != null" class="text-xs opacity-60 mt-2">
             Factibilidad: <span x-text="Math.round((plan?.feasibility_score ?? 0) * 100) + '%'"></span>
+          </p>
+          <p x-show="planError" class="text-xs text-rose-700 mt-2 break-words">
+            <span class="font-semibold">Error al cargar el plan:</span>
+            <span x-text="planError"></span>
           </p>
         </div>
 
@@ -740,6 +757,7 @@
         planLoading: false,
         planError: '',
         upcomingPlans: [],
+        upcomingError: '',
         blockFeedback: {},
         supportMembers: [],
         shoppingPending: [],
@@ -909,9 +927,15 @@
 
         async loadUpcoming() {
           if (!this.token) return
+          this.upcomingError = ''
           const dates = [1, 2, 3].map(o => this.offsetDateISO(o))
           const results = await Promise.all(dates.map(d => this.api(`/plan/${d}`)))
           this.upcomingPlans = results.filter(p => p && !p.__error)
+          const errors = results.filter(p => p && p.__error).map(p => p.__error)
+          if (errors.length) {
+            this.upcomingError = errors[0]
+            console.error('loadUpcoming errors', errors)
+          }
         },
 
         get tomorrowPlan() {
