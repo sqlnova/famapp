@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
@@ -18,6 +20,37 @@ logger = structlog.get_logger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 AR_TZ = pytz.timezone("America/Argentina/Buenos_Aires")
+
+# TTL cache para list_upcoming_events. El Home dispara 4 llamadas a
+# /api/plan/:date (hoy + 3 días) en paralelo; sin caché cada una golpea
+# Google Calendar con la misma ventana. 30s es suficiente para compartir
+# resultado entre esas llamadas y sigue fresco para refrescos del usuario.
+_EVENTS_CACHE_TTL = 30.0
+_events_cache: dict[tuple, tuple[float, List[CalendarEvent]]] = {}
+_events_cache_lock = threading.Lock()
+
+
+def _events_cache_get(key: tuple) -> Optional[List[CalendarEvent]]:
+    with _events_cache_lock:
+        entry = _events_cache.get(key)
+        if entry is None:
+            return None
+        expires_at, value = entry
+        if time.monotonic() >= expires_at:
+            _events_cache.pop(key, None)
+            return None
+        return value
+
+
+def _events_cache_set(key: tuple, value: List[CalendarEvent]) -> None:
+    with _events_cache_lock:
+        _events_cache[key] = (time.monotonic() + _EVENTS_CACHE_TTL, value)
+
+
+def invalidate_events_cache() -> None:
+    """Clear the events cache. Call after any create/update/delete mutation."""
+    with _events_cache_lock:
+        _events_cache.clear()
 
 
 def _get_service():
@@ -104,6 +137,11 @@ def list_upcoming_events(
     max_results: int = 250,
 ) -> List[CalendarEvent]:
     """Return upcoming events for the next `days` days."""
+    cache_key = (days, max_results)
+    cached = _events_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     s = get_settings()
     service = _get_service()
     now = datetime.now(timezone.utc)
@@ -124,6 +162,7 @@ def list_upcoming_events(
         )
         events = [_parse_event(e) for e in result.get("items", [])]
         logger.info("calendar_events_fetched", count=len(events), days=days)
+        _events_cache_set(cache_key, events)
         return events
     except HttpError as e:
         logger.error("calendar_list_error", error=str(e))
@@ -200,6 +239,7 @@ def create_event(
     try:
         created = service.events().insert(calendarId=s.google_calendar_id, body=body).execute()
         logger.info("calendar_event_created", title=event.title, id=created.get("id"), recurring=bool(recurrence))
+        invalidate_events_cache()
         return _parse_event(created)
     except HttpError as e:
         logger.error("calendar_create_error", error=str(e))
@@ -270,6 +310,7 @@ def update_event(event_id: str, updates: dict[str, Any]) -> CalendarEvent:
             body=body,
         ).execute()
         logger.info("calendar_event_updated", id=event_id)
+        invalidate_events_cache()
         return _parse_event(updated)
     except HttpError as e:
         logger.error("calendar_update_error", id=event_id, error=str(e))
@@ -283,6 +324,7 @@ def delete_event(event_id: str) -> None:
     try:
         service.events().delete(calendarId=s.google_calendar_id, eventId=event_id).execute()
         logger.info("calendar_event_deleted", id=event_id)
+        invalidate_events_cache()
     except HttpError as e:
         logger.error("calendar_delete_error", id=event_id, error=str(e))
         raise
