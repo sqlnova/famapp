@@ -11,9 +11,11 @@ def test_suggest_departure_for_routine_future_time():
 
     result = web._suggest_departure_for_routine(time_str, None)
     assert result is not None, f"Should calculate departure for future time {time_str}"
-    assert isinstance(result, str), "Should return ISO format string"
+    assert result["source"] == "fallback_30m"
+    assert result["reason"] == "missing_location"
+    assert isinstance(result["suggested_departure"], str), "Should return ISO format string"
 
-    departure_time = datetime.fromisoformat(result)
+    departure_time = datetime.fromisoformat(result["suggested_departure"])
     assert departure_time > datetime.now(AR_TZ), "Departure should be in the future"
 
 
@@ -22,7 +24,8 @@ def test_suggest_departure_for_routine_past_time_rolls_over():
     # Arbitrary time; the function must suggest the next occurrence.
     result = web._suggest_departure_for_routine("06:00", None)
     assert result is not None, "Recurring routines should roll over to next day"
-    departure = datetime.fromisoformat(result)
+    assert result["suggested_departure"] is not None
+    departure = datetime.fromisoformat(result["suggested_departure"])
     assert departure > datetime.now(AR_TZ), "Departure must be in the future"
 
 
@@ -35,8 +38,8 @@ def test_suggest_departure_for_routine_soon_time():
     result = web._suggest_departure_for_routine(time_str, None)
     # Depending on the exact time, this might return None (if departure goes to past)
     # or a time. Both are acceptable.
-    if result:
-        departure_time = datetime.fromisoformat(result)
+    if result and result["suggested_departure"]:
+        departure_time = datetime.fromisoformat(result["suggested_departure"])
         assert departure_time > datetime.now(AR_TZ), "Departure should be in the future"
 
 
@@ -48,16 +51,20 @@ def test_suggest_departure_with_location_fallback():
     # With a location but no travel time data, should use default fallback
     result = web._suggest_departure_for_routine(time_str, "Some Non-existent Place")
     assert result is not None, "Should handle location gracefully"
-    assert isinstance(result, str), "Should return ISO format string"
+    assert isinstance(result["suggested_departure"], str), "Should return ISO format string"
+    assert result["source"] == "fallback_30m"
+    assert result["reason"] in {"maps_no_route", "maps_request_failed", "maps_key_missing"}
 
 
 def test_suggest_departure_invalid_time_string():
-    """Test that invalid time strings return None."""
+    """Test that invalid time strings return metadata with no suggestion."""
     result = web._suggest_departure_for_routine("invalid", None)
-    assert result is None, "Should handle invalid time strings gracefully"
+    assert result["suggested_departure"] is None
+    assert result["reason"] == "invalid_time"
 
     result = web._suggest_departure_for_routine("", None)
-    assert result is None, "Should handle empty time strings gracefully"
+    assert result["suggested_departure"] is None
+    assert result["reason"] == "invalid_time"
 
 
 class _FakeQuery:
@@ -147,3 +154,4 @@ def test_api_routines_calculates_departure_times(monkeypatch):
     time_str = f"{tomorrow.hour:02d}:{tomorrow.minute:02d}"
     result = web._suggest_departure_for_routine(time_str, "Colegio Don Bosco")
     assert result is not None, "Should calculate departure for tomorrow's routine"
+    assert "source" in result

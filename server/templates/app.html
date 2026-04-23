@@ -355,6 +355,11 @@
                   <p>🕒 <span x-text="fmtTime(event.start)"></span></p>
                   <p class="text-iosBlue" x-show="event.suggested_departure">🚗 Salir <span x-text="fmtTime(event.suggested_departure)"></span></p>
                 </div>
+                <p
+                  x-show="event.suggested_departure && isFallbackSource(event.suggested_departure_source)"
+                  class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1"
+                  x-text="mapsFallbackNotice(event.suggested_departure_reason)"
+                ></p>
                 <div class="grid grid-cols-2 gap-2 text-xs">
                   <p class="rounded-xl bg-slate-50 px-2 py-1">Llevar: <span x-text="eventDropoff(event)"></span></p>
                   <p class="rounded-xl bg-slate-50 px-2 py-1">Buscar: <span x-text="eventPickup(event)"></span></p>
@@ -639,6 +644,18 @@
             <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
               <p>Ida: <span x-text="routine.outbound_time || '-' "></span> · <span x-text="routine.outbound_responsible || '-' "></span></p>
               <p>Vuelta: <span x-text="routine.return_time || '-' "></span> · <span x-text="routine.return_responsible || '-' "></span></p>
+            </div>
+            <div class="mt-2 space-y-1">
+              <p
+                x-show="routine.suggested_departure_outbound && isFallbackSource(routine.suggested_departure_outbound_source)"
+                class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1"
+                x-text="'Ida: ' + mapsFallbackNotice(routine.suggested_departure_outbound_reason)"
+              ></p>
+              <p
+                x-show="routine.suggested_departure_return && isFallbackSource(routine.suggested_departure_return_source)"
+                class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1"
+                x-text="'Vuelta: ' + mapsFallbackNotice(routine.suggested_departure_return_reason)"
+              ></p>
             </div>
             <p class="mt-2 text-sm text-slate-500">Hijos: <span x-text="(routine.children || []).join(', ') || '-' "></span></p>
             <p class="mt-2 text-sm text-slate-500">Lugar: <span x-text="routine.place_name || routine.place_alias || '-' "></span></p>
@@ -1783,6 +1800,22 @@
           const start = new Date(startIso)
           const leave = new Date(start.getTime() - 30 * 60 * 1000)
           return leave.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: AR_TZ })
+        },
+
+        isFallbackSource(source) {
+          return !!source && source !== 'google_maps'
+        },
+
+        mapsFallbackNotice(reason) {
+          const details = {
+            maps_key_missing: 'estimación estándar, Google Maps no configurado',
+            maps_no_route: 'estimación estándar, Maps sin ruta para ese destino',
+            maps_request_failed: 'estimación estándar, Maps no disponible',
+            missing_location: 'estimación estándar, falta ubicación',
+            invalid_time: 'estimación estándar, hora inválida',
+            past_departure: 'estimación estándar, salida ya vencida',
+          }
+          return details[reason] || 'estimación estándar, Maps no disponible'
         },
 
         eventDropoff(event) {

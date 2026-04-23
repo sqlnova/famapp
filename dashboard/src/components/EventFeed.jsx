@@ -3,6 +3,7 @@ const AGENT_LABELS = {
   schedule: "Schedule",
   logistics: "Logistics",
   shopping: "Shopping",
+  homework: "Homework",
 };
 
 function formatTime(iso) {
