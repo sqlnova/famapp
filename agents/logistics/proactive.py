@@ -430,7 +430,7 @@ async def _run_homework_reminders() -> None:
                 when = "mañana" if diff == 1 else "pasado mañana"
                 lines.append(f"  • {t.description} ({t.subject}) — vence *{when}*")
 
-        await broadcast_whatsapp_message("\n".join(lines))
+        broadcast_whatsapp_message("\n".join(lines))
         logger.info("homework_reminders_sent", count=len(due_soon))
     except Exception:
         logger.exception("homework_reminders_error")

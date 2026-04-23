@@ -106,15 +106,20 @@ def get_travel_time(
     maps = _get_maps()
     logger.info("maps_request", origin=origin, destination=destination)
 
-    result = maps.directions(
-        origin=origin,
-        destination=destination,
-        mode="driving",
-        departure_time=departure_time,
-        traffic_model="best_guess",
-    )
+    try:
+        result = maps.directions(
+            origin=origin,
+            destination=destination,
+            mode="driving",
+            departure_time=departure_time,
+            traffic_model="best_guess",
+        )
+    except Exception as e:
+        logger.exception("maps_directions_api_error", origin=origin, destination=destination, error=str(e))
+        raise ValueError(f"Google Maps API error: {str(e)}")
 
     if not result:
+        logger.warning("maps_no_route", origin=origin, destination=destination)
         raise ValueError(f"No route found from '{origin}' to '{destination}'")
 
     leg = result[0]["legs"][0]

@@ -62,11 +62,19 @@ def broadcast_whatsapp_message(body: str, recipients: Optional[List[str]] = None
     (falls back to FAMILY_PHONE_NUMBERS env var if the DB is unavailable).
     """
     targets = recipients if recipients is not None else _get_broadcast_recipients()
+    if not targets:
+        logger.warning("whatsapp_broadcast_no_recipients")
+        return []
+
     sids: List[str] = []
     for to in targets:
         try:
             sid = send_whatsapp_message(to, body)
             sids.append(sid)
+            logger.debug("whatsapp_broadcast_success", to=mask_phone(to), sid=sid)
         except Exception:
             logger.exception("whatsapp_broadcast_error", to=mask_phone(to))
+
+    if sids:
+        logger.info("whatsapp_broadcast_sent", count=len(sids))
     return sids

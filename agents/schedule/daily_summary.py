@@ -225,20 +225,17 @@ async def send_daily_summary() -> None:
                 logger.info("daily_summary_sent_to", nickname=member.nickname, date=today.isoformat())
                 if sent_content is None:
                     sent_content = content
-            except Exception:
-                logger.exception("daily_summary_member_error", nickname=member.nickname)
+            except Exception as e:
+                logger.exception("daily_summary_member_error", nickname=member.nickname, error=str(e))
     else:
         # Fallback: broadcast a generic summary if no adults are registered in DB
         try:
-            from core.whatsapp import _get_broadcast_recipients
-            from core.config import get_settings
-
             content = _build_generic_summary(today, today_events, tomorrow_events, due_tasks, due_homework, conflicts)
             broadcast_whatsapp_message(content)
             sent_content = content
             logger.info("daily_summary_sent_generic", date=today.isoformat())
-        except Exception:
-            logger.exception("daily_summary_generic_error", date=today.isoformat())
+        except Exception as e:
+            logger.exception("daily_summary_generic_error", date=today.isoformat(), error=str(e))
 
     if sent_content is not None:
         try:
