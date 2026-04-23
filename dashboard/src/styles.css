@@ -267,7 +267,7 @@ body,
   width: 100%;
   height: auto;
   display: block;
-  aspect-ratio: 720 / 400;
+  aspect-ratio: 920 / 430;
 }
 
 .ws-label {
@@ -544,6 +544,11 @@ body,
   color: #fdba74;
   border-color: rgba(253, 186, 116, 0.22);
   background: rgba(249, 115, 22, 0.12);
+}
+.agent-homework {
+  color: #f9a8d4;
+  border-color: rgba(249, 168, 212, 0.26);
+  background: rgba(236, 72, 153, 0.12);
 }
 
 .feed-status {

@@ -181,33 +181,55 @@ def _save_routine_to_tasks_store(clean_payload: Dict[str, Any]) -> Dict[str, Any
     }
 
 
-def _suggest_departure(start: datetime, location: Optional[str]) -> str:
-    """Suggest departure time using Maps traffic when available, fallback to -30m."""
-    minutes_before = 30
-    if location:
-        try:
-            known = get_known_places_dict()
-            resolved = resolve_place_address(location, known)
-            travel = get_travel_time(destination=resolved, departure_time=start.astimezone(timezone.utc))
-            minutes_before = max(15, travel.duration_minutes + 10)
-        except Exception:
-            logger.info("maps_fallback_departure", location=location)
-    leave = start - timedelta(minutes=minutes_before)
-    return leave.astimezone(AR_TZ).isoformat()
+def _suggest_departure(start: datetime, location: Optional[str]) -> Dict[str, Optional[str]]:
+    """Suggest departure time and metadata using Maps traffic when available."""
+    fallback_minutes = 30
+    leave = start - timedelta(minutes=fallback_minutes)
+    payload: Dict[str, Optional[str]] = {
+        "suggested_departure": leave.astimezone(AR_TZ).isoformat(),
+        "source": "fallback_30m",
+        "reason": None,
+    }
+
+    if not location:
+        payload["reason"] = "missing_location"
+        logger.info("maps_fallback_departure_missing_location")
+        return payload
+
+    try:
+        known = get_known_places_dict()
+        resolved = resolve_place_address(location, known)
+        travel = get_travel_time(destination=resolved, departure_time=start.astimezone(timezone.utc))
+        minutes_before = max(15, travel.duration_minutes + 10)
+        leave = start - timedelta(minutes=minutes_before)
+        payload["suggested_departure"] = leave.astimezone(AR_TZ).isoformat()
+        payload["source"] = "google_maps"
+        payload["reason"] = None
+        return payload
+    except RuntimeError as error:
+        payload["reason"] = "maps_key_missing"
+        logger.warning("maps_fallback_departure_key_missing", location=location, error=str(error))
+    except ValueError as error:
+        payload["reason"] = "maps_no_route"
+        logger.warning("maps_fallback_departure_no_route", location=location, error=str(error))
+    except Exception as error:
+        payload["reason"] = "maps_request_failed"
+        logger.warning("maps_fallback_departure_error", location=location, error=str(error))
+    return payload
 
 
-def _suggest_departure_for_routine(time_str: str, location: Optional[str]) -> Optional[str]:
+def _suggest_departure_for_routine(time_str: str, location: Optional[str]) -> Dict[str, Optional[str]]:
     """Calculate next departure time for a recurring routine.
 
     Rutinas se repiten día tras día, así que si la hora de hoy ya pasó,
     devolvemos la sugerencia para la próxima ocurrencia (mañana).
     """
     if not time_str or ":" not in time_str:
-        return None
+        return {"suggested_departure": None, "source": "fallback_30m", "reason": "invalid_time"}
     try:
         h, m = map(int, time_str.split(':')[:2])
         if not (0 <= h < 24 and 0 <= m < 60):
-            return None
+            return {"suggested_departure": None, "source": "fallback_30m", "reason": "invalid_time"}
         now = datetime.now(AR_TZ)
         action_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
 
@@ -215,13 +237,16 @@ def _suggest_departure_for_routine(time_str: str, location: Optional[str]) -> Op
         if action_time <= now:
             action_time = action_time + timedelta(days=1)
 
-        departure_iso = _suggest_departure(action_time, location)
+        departure = _suggest_departure(action_time, location)
+        departure_iso = departure.get("suggested_departure")
+        if not departure_iso:
+            return {"suggested_departure": None, "source": "fallback_30m", "reason": "invalid_time"}
         departure_time = datetime.fromisoformat(departure_iso)
         if departure_time <= now:
-            return None
-        return departure_iso
+            return {"suggested_departure": None, "source": departure.get("source"), "reason": "past_departure"}
+        return departure
     except (ValueError, AttributeError, TypeError):
-        return None
+        return {"suggested_departure": None, "source": "fallback_30m", "reason": "invalid_time"}
 
 
 _ROUTINE_ID_TAG = "[routine_id:"
@@ -398,11 +423,18 @@ async def api_events(user=Depends(require_auth), x_user_nickname: Optional[str] 
             departure_tasks[e.id] = loop.run_in_executor(
                 None, _suggest_departure, e.start, e.location
             )
-    departures: Dict[str, Optional[str]] = {}
+    departures: Dict[str, Dict[str, Optional[str]]] = {}
     if departure_tasks:
         results = await asyncio.gather(*departure_tasks.values(), return_exceptions=True)
         for eid, res in zip(departure_tasks.keys(), results):
-            departures[eid] = res if not isinstance(res, Exception) else None
+            if isinstance(res, Exception):
+                departures[eid] = {
+                    "suggested_departure": None,
+                    "source": "fallback_30m",
+                    "reason": "executor_error",
+                }
+            else:
+                departures[eid] = res
 
     return [
         {
@@ -415,7 +447,9 @@ async def api_events(user=Depends(require_auth), x_user_nickname: Optional[str] 
             "children": e.children,
             "recurring_event_id": e.recurring_event_id,
             "is_recurring": not e.alerts_enabled,
-            "suggested_departure": departures.get(e.id),
+            "suggested_departure": (departures.get(e.id) or {}).get("suggested_departure"),
+            "suggested_departure_source": (departures.get(e.id) or {}).get("source"),
+            "suggested_departure_reason": (departures.get(e.id) or {}).get("reason"),
         }
         for e in events
     ]
@@ -978,8 +1012,13 @@ async def api_routines(user=Depends(require_auth), x_user_nickname: Optional[str
         if tasks:
             results = await asyncio.gather(*(t[2] for t in tasks), return_exceptions=True)
             for (idx, field, _), res in zip(tasks, results):
-                if not isinstance(res, Exception):
-                    rows[idx][field] = res
+                if isinstance(res, Exception):
+                    continue
+                rows[idx][field] = res.get("suggested_departure")
+                source_field = f"{field}_source"
+                reason_field = f"{field}_reason"
+                rows[idx][source_field] = res.get("source")
+                rows[idx][reason_field] = res.get("reason")
 
     return rows
 

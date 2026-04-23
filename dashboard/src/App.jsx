@@ -13,6 +13,7 @@ const AGENTS = [
   { key: "schedule", label: "Schedule", description: "Calendar operations" },
   { key: "logistics", label: "Logistics", description: "Travel & alerts" },
   { key: "shopping", label: "Shopping", description: "Grocery list" },
+  { key: "homework", label: "Homework", description: "School tasks & reminders" },
 ];
 
 export default function App() {

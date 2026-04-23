@@ -1,7 +1,7 @@
 # FamApp Agent Monitoring Dashboard
 
-A React + Vite dashboard that shows FamApp's four LangGraph agents
-(Intake, Schedule, Logistics, Shopping) in a pixel-art isometric
+A React + Vite dashboard that shows FamApp's five LangGraph agents
+(Intake, Schedule, Logistics, Shopping, Homework) in a pixel-art isometric
 office, one desk per agent, with a live event feed.
 
 Hosted separately on **Cloudflare Pages** (or any static host).
@@ -56,7 +56,7 @@ npx wrangler pages deploy dist --project-name famapp-monitoring
 * `useMonitoringSocket` opens the WebSocket, applies the initial
   `snapshot` payload, then appends each incoming `event`. It
   reconnects with exponential backoff (max 15 s) on disconnect.
-* `Office` renders a tilted (`rotateX/rotateZ`) tiled floor with four
+* `Office` renders a tilted (`rotateX/rotateZ`) tiled floor with five
   desk slots. Each `Desk` counter-rotates so sprites stay upright.
 * `AgentSprite` is a small SVG pixel character. CSS classes driven by
   `status` add glow/bob (active) or shake/red tint (error).

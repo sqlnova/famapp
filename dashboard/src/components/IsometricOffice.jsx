@@ -12,21 +12,23 @@
 
 const TILE_W = 120;
 const TILE_H = 60;
-const ORIGIN_X = 340;
-const ORIGIN_Y = 90;
+const ORIGIN_X = 280;
+const ORIGIN_Y = 85;
 
 const iso = (x, y, z = 0) => ({
   x: ORIGIN_X + (x - y) * (TILE_W / 2),
   y: ORIGIN_Y + (x + y) * (TILE_H / 2) - z,
 });
 
-// 2x2 grid — front row (intake, schedule), back row (logistics, shopping).
-// Positions picked so the furthest desks sit "higher" on screen.
+// 3x2 staggered grid for 5 agents.
+// Back row: logistics, shopping, homework.
+// Front row: intake, schedule.
 const LAYOUT = {
-  intake: { gx: 0, gy: 2 },
-  schedule: { gx: 2, gy: 2 },
+  intake: { gx: 1, gy: 2 },
+  schedule: { gx: 3, gy: 2 },
   logistics: { gx: 0, gy: 0 },
   shopping: { gx: 2, gy: 0 },
+  homework: { gx: 4, gy: 0 },
 };
 
 const STATUS_COLORS = {
@@ -182,7 +184,7 @@ export default function IsometricOffice({ agents }) {
   return (
     <div className="iso-wrap">
       <svg
-        viewBox="0 0 720 400"
+        viewBox="0 0 920 430"
         className="iso-svg"
         xmlns="http://www.w3.org/2000/svg"
       >
@@ -213,7 +215,7 @@ export default function IsometricOffice({ agents }) {
         </defs>
 
         {/* Background */}
-        <rect width="720" height="400" fill="url(#bg-gradient)" />
+        <rect width="920" height="430" fill="url(#bg-gradient)" />
 
         {/* Floor tiles (2x2 each) */}
         {agents.map((a) => {
