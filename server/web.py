@@ -48,6 +48,7 @@ from core.supabase_client import (
     upsert_preference_profile,
     upsert_support_member,
 )
+from core.capture_agent import run_capture_agent
 
 logger = structlog.get_logger(__name__)
 
@@ -800,6 +801,116 @@ async def suggest_tasks(payload: Dict[str, Any] = Body(...), user=Depends(requir
     suggestions = generate_task_suggestions(event)
     suggestions = filter_duplicate_suggestions(suggestions)
     return {"suggestions": suggestions}
+
+
+@router.post("/api/captures")
+async def create_capture(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    client = get_supabase()
+    row = {
+        "family_id": payload.get("family_id"),
+        "user_id": payload.get("user_id"),
+        "raw_input": (payload.get("raw_input") or "").strip(),
+        "input_type": payload.get("input_type", "text"),
+        "source": payload.get("source", "manual"),
+        "status": "pending",
+        "ai_result_json": None,
+        "confidence": None,
+    }
+    if not row["raw_input"]:
+        raise HTTPException(status_code=400, detail="raw_input es obligatorio")
+    result = client.table("captures").insert(row).execute()
+    return result.data[0]
+
+
+@router.get("/api/captures")
+async def list_captures(status: Optional[str] = None, user=Depends(require_auth)):
+    client = get_supabase()
+    q = client.table("captures").select("*").order("created_at", desc=True)
+    if status:
+        q = q.eq("status", status)
+    result = q.execute()
+    return result.data
+
+
+@router.get("/api/captures/{capture_id}")
+async def get_capture(capture_id: UUID, user=Depends(require_auth)):
+    client = get_supabase()
+    result = client.table("captures").select("*").eq("id", str(capture_id)).limit(1).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Capture no encontrada")
+    return result.data[0]
+
+
+@router.post("/api/captures/{capture_id}/process")
+async def process_capture(capture_id: UUID, user=Depends(require_auth)):
+    client = get_supabase()
+    fetch = client.table("captures").select("*").eq("id", str(capture_id)).limit(1).execute()
+    if not fetch.data:
+        raise HTTPException(status_code=404, detail="Capture no encontrada")
+    capture = fetch.data[0]
+    family_members = get_family_members()
+    ctx = {"members": [{"name": m.name, "nickname": m.nickname, "is_minor": m.is_minor} for m in family_members]}
+    ai_result = run_capture_agent(capture.get("raw_input") or "", ctx, input_type=capture.get("input_type") or "text")
+    payload = ai_result.model_dump(mode="json")
+    updated = client.table("captures").update({
+        "status": "processed",
+        "ai_result_json": payload,
+        "confidence": payload.get("confidence", 0),
+    }).eq("id", str(capture_id)).execute()
+    return updated.data[0]
+
+
+@router.post("/api/captures/{capture_id}/confirm")
+async def confirm_capture(capture_id: UUID, payload: Dict[str, Any] = Body(default={}), user=Depends(require_auth)):
+    client = get_supabase()
+    fetch = client.table("captures").select("*").eq("id", str(capture_id)).limit(1).execute()
+    if not fetch.data:
+        raise HTTPException(status_code=404, detail="Capture no encontrada")
+    capture = fetch.data[0]
+    ai_result = payload.get("ai_result_json") or capture.get("ai_result_json") or {}
+    created_events = []
+    created_tasks = []
+    for event in ai_result.get("events", []):
+        if not event.get("date") or not event.get("start_time"):
+            continue
+        start = datetime.fromisoformat(f\"{event['date']}T{event['start_time']}:00-03:00\")
+        end = start + timedelta(hours=1)
+        created = create_event(CalendarEvent(title=event.get("title") or "Evento", start=start, end=end, location=event.get("location")))
+        created_events.append(created.id)
+        reminders = [
+            {"capture_id": str(capture_id), "title": f\"Recordatorio: {event.get('title')}\", "remind_at": (start - timedelta(hours=24)).isoformat(), "status": "pending"},
+            {"capture_id": str(capture_id), "title": f\"Hoy: {event.get('title')}\", "remind_at": (start - timedelta(hours=2)).isoformat(), "status": "pending"},
+        ]
+        client.table("capture_reminders").insert(reminders).execute()
+    for task in ai_result.get("tasks", []):
+        t = client.table("tasks").insert({"agent": "family_task", "payload": task, "status": "pending"}).execute()
+        created_tasks.append(t.data[0]["id"])
+    updated = client.table("captures").update({"status": "confirmed"}).eq("id", str(capture_id)).execute()
+    return {"capture": updated.data[0], "created_events": created_events, "created_tasks": created_tasks}
+
+
+@router.post("/api/captures/{capture_id}/discard")
+async def discard_capture(capture_id: UUID, user=Depends(require_auth)):
+    client = get_supabase()
+    updated = client.table("captures").update({"status": "discarded"}).eq("id", str(capture_id)).execute()
+    if not updated.data:
+        raise HTTPException(status_code=404, detail="Capture no encontrada")
+    return {"ok": True}
+
+
+@router.post("/api/push/register")
+async def register_push_token(payload: Dict[str, Any] = Body(...), user=Depends(require_auth)):
+    token = (payload.get("token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="token es obligatorio")
+    client = get_supabase()
+    result = client.table("push_tokens").upsert({
+        "token": token,
+        "user_id": payload.get("user_id"),
+        "family_id": payload.get("family_id"),
+        "platform": payload.get("platform", "expo"),
+    }, on_conflict="token").execute()
+    return result.data[0]
 
 
 @router.post("/api/agent/chat")

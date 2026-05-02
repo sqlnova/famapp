@@ -137,3 +137,40 @@ Módulos incluidos:
 - Compras (pendientes/comprados + alta rápida)
 - Rutinas familiares (crear/editar)
 - Más/Configuración (familia + lugares)
+
+## Mobile-first captura inteligente
+
+### Backend
+1. Ejecutar migraciones nuevas (`db/migrations/014_mobile_capture.sql`).
+2. Nuevos endpoints autenticados en `/app/api/captures`:
+   - `POST /api/captures`
+   - `GET /api/captures`
+   - `GET /api/captures/:id`
+   - `POST /api/captures/:id/process`
+   - `POST /api/captures/:id/confirm`
+   - `POST /api/captures/:id/discard`
+3. Registro de push token: `POST /api/push/register`.
+
+### Mobile (Expo)
+```bash
+cd mobile
+npm install
+EXPO_PUBLIC_API_URL=http://localhost:8000 npx expo start
+```
+
+### Variables de entorno nuevas
+- `OPENAI_API_KEY`
+- `APP_TIMEZONE=America/Argentina/Buenos_Aires`
+- `EXPO_PUBLIC_API_URL`
+
+### OpenAI Capture Agent
+`core/capture_agent.py` implementa extracción estructurada (eventos/tareas/recordatorios) con `structured_output` de LangChain/OpenAI y fallback heurístico.
+
+### Push notifications
+Se deja preparado:
+- storage de `push_tokens`
+- tabla `capture_reminders`
+- generación de reminders al confirmar capturas
+
+### Twilio desacoplado
+Twilio se mantiene para webhook de WhatsApp, pero captura inteligente corre por API web/mobile sin depender del canal WhatsApp.
