@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     app_env: str = Field("development")
     log_level: str = Field("INFO")
     webhook_base_url: str = Field("http://localhost:8000")
+    app_timezone: str = Field("America/Argentina/Buenos_Aires")
 
     @property
     def is_production(self) -> bool:
